@@ -1,0 +1,33 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.out
+coverage.html
+*.test
+
+# Go
+vendor/
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Secrets and keys
+*.pem
+*.key
+token.json
+token.txt
+
+# OS
+.DS_Store
+Thumbs.db
