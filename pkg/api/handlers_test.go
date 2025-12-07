@@ -490,9 +490,6 @@ func TestMetricsEndpoint_ContainsExpectedMetrics(t *testing.T) {
 		t.Fatalf("Failed to create token pair: %d", w.Code)
 	}
 
-	// Give Redis a moment to persist
-	time.Sleep(50 * time.Millisecond)
-
 	// Now fetch metrics
 	req2 := httptest.NewRequest("GET", "/metrics", nil)
 	w2 := httptest.NewRecorder()
@@ -541,9 +538,6 @@ func TestMetricsEndpoint_UpdatesFromStorage(t *testing.T) {
 		t.Fatalf("Failed to create token pair: %d", w.Code)
 	}
 
-	// Give Redis a moment to persist
-	time.Sleep(50 * time.Millisecond)
-
 	// First metrics request
 	req1 := httptest.NewRequest("GET", "/metrics", nil)
 	w1 := httptest.NewRecorder()
@@ -575,9 +569,6 @@ func TestMetricsEndpoint_UpdatesFromStorage(t *testing.T) {
 	if w2.Code != http.StatusCreated {
 		t.Fatalf("Failed to create second token pair: %d", w2.Code)
 	}
-
-	// Give Redis a moment to persist
-	time.Sleep(50 * time.Millisecond)
 
 	// Second metrics request - should show updated count
 	req3 := httptest.NewRequest("GET", "/metrics", nil)
