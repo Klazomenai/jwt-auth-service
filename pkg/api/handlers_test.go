@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -425,5 +426,159 @@ func TestContentType(t *testing.T) {
 	contentType := w.Header().Get("Content-Type")
 	if contentType != "application/json" {
 		t.Errorf("Expected Content-Type application/json, got %s", contentType)
+	}
+}
+
+func TestMetricsEndpoint_ReturnsOK(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+func TestMetricsEndpoint_PrometheusFormat(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	body := w.Body.String()
+
+	// Check for Prometheus format indicators
+	if !strings.Contains(body, "# HELP") {
+		t.Error("Response should contain Prometheus HELP comments")
+	}
+
+	if !strings.Contains(body, "# TYPE") {
+		t.Error("Response should contain Prometheus TYPE comments")
+	}
+}
+
+func TestMetricsEndpoint_ContainsExpectedMetrics(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+
+	// Create a token pair to populate metrics
+	requestBody := TokenRequest{
+		UserID:       "metrics-test-user",
+		Network:      "testnet",
+		RateLimit:    100,
+		IncludeChild: true,
+	}
+
+	body, _ := json.Marshal(requestBody)
+	req := httptest.NewRequest("POST", "/token-pairs", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	server.CreateTokenPair(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Failed to create token pair: %d", w.Code)
+	}
+
+	// Now fetch metrics
+	req2 := httptest.NewRequest("GET", "/metrics", nil)
+	w2 := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w2, req2)
+
+	bodyStr := w2.Body.String()
+
+	// Check for expected metric names
+	expectedMetrics := []string{
+		"jwt_parent_tokens_active_total",
+		"jwt_parent_token_expiry_timestamp_seconds",
+		"jwt_parent_token_issued_timestamp_seconds",
+	}
+
+	for _, metric := range expectedMetrics {
+		if !strings.Contains(bodyStr, metric) {
+			t.Errorf("Response should contain metric: %s", metric)
+		}
+	}
+}
+
+func TestMetricsEndpoint_UpdatesFromStorage(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+
+	// Create a token pair with auto-renewal config (creates storage entry)
+	requestBody := TokenRequest{
+		UserID:       "test-user",
+		Network:      "devnet",
+		RateLimit:    100,
+		IncludeChild: true,
+	}
+
+	body, _ := json.Marshal(requestBody)
+	req := httptest.NewRequest("POST", "/token-pairs", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	server.CreateTokenPair(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Failed to create token pair: %d", w.Code)
+	}
+
+	// First metrics request
+	req1 := httptest.NewRequest("GET", "/metrics", nil)
+	w1 := httptest.NewRecorder()
+	server.Router().ServeHTTP(w1, req1)
+
+	body1 := w1.Body.String()
+
+	// Check that jwt_parent_tokens_active_total shows 1
+	if !strings.Contains(body1, "jwt_parent_tokens_active_total 1") {
+		t.Error("First metrics request should show 1 active parent token")
+	}
+
+	// Create another token pair
+	requestBody2 := TokenRequest{
+		UserID:       "test-user-2",
+		Network:      "mainnet",
+		RateLimit:    100,
+		IncludeChild: true,
+	}
+
+	body2, _ := json.Marshal(requestBody2)
+	req2 := httptest.NewRequest("POST", "/token-pairs", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	req2 = req2.WithContext(ctx)
+	w2 := httptest.NewRecorder()
+
+	server.CreateTokenPair(w2, req2)
+
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("Failed to create second token pair: %d", w2.Code)
+	}
+
+	// Second metrics request - should show updated count
+	req3 := httptest.NewRequest("GET", "/metrics", nil)
+	w3 := httptest.NewRecorder()
+	server.Router().ServeHTTP(w3, req3)
+
+	body3 := w3.Body.String()
+
+	// Check that jwt_parent_tokens_active_total now shows 2
+	if !strings.Contains(body3, "jwt_parent_tokens_active_total 2") {
+		t.Error("Second metrics request should show 2 active parent tokens, got: " + body3)
 	}
 }
