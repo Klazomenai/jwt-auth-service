@@ -356,6 +356,36 @@ Do not use in production until beta status. See [SECURITY.md](SECURITY.md) for d
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 
+## Release Workflow
+
+This project uses [release-please](https://github.com/googleapis/release-please) for automated releases with [Conventional Commits](https://www.conventionalcommits.org/).
+
+```mermaid
+flowchart TD
+    A[Developer creates PR] --> B[commitlint validates commits]
+    B -->|Valid| C[CI runs: test + lint]
+    B -->|Invalid| X[PR blocked until commits fixed]
+    C --> D[PR merged to main]
+    D --> E[release-please analyzes commits]
+    E --> F{Release PR exists?}
+    F -->|No| G[Create Release PR]
+    F -->|Yes| H[Update Release PR]
+    G --> I[Accumulate changes]
+    H --> I
+    I --> J{Maintainer merges Release PR?}
+    J -->|No| K[Wait for more commits]
+    K --> A
+    J -->|Yes| L[Update CHANGELOG.md]
+    L --> M[Create Git tag: v0.0.1-alpha.x]
+    M --> N[Create GitHub Release]
+    N --> O[Docker job triggers]
+    O --> P[Build Docker image]
+    P --> Q[Push to GHCR]
+    Q --> R{Alpha/Beta release?}
+    R -->|Yes| S[Tag: v0.0.1-alpha.x only]
+    R -->|No| T[Tag: version + latest]
+```
+
 ## Contributing
 
 Contributions are welcome! This project is in active development.
