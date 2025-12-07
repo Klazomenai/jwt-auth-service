@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.0.1-alpha.0...v0.1.0-alpha.0) (2025-12-07)
+
+
+### Added
+
+* add manual build workflow for testing ([35bef98](https://github.com/Klazomenai/jwt-auth-service/commit/35bef987abbe9d387e07d5c912d6f1583a2b67ea))
+* implement release-please for automated changelog and release management ([bad88af](https://github.com/Klazomenai/jwt-auth-service/commit/bad88af5fea689af29763b27b91f778fd569c198))
+* implement release-please for automated changelog and release management ([3ed2fb0](https://github.com/Klazomenai/jwt-auth-service/commit/3ed2fb0abe7f42fe6b1182ccba636c2d38428e05)), closes [#2](https://github.com/Klazomenai/jwt-auth-service/issues/2)
+* initial release of jwt-auth-service v0.0.1-alpha ([5264f41](https://github.com/Klazomenai/jwt-auth-service/commit/5264f411ecae7ef24f2a151962f072f049581302))
+
 ## [0.0.1-alpha.0](https://github.com/klazomenai/jwt-auth-service/releases/tag/v0.0.1-alpha.0) (2025-10-31)
 
 ### Added
