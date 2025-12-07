@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -454,11 +455,11 @@ func TestMetricsEndpoint_PrometheusFormat(t *testing.T) {
 	body := w.Body.String()
 
 	// Check for Prometheus format indicators
-	if !containsString(body, "# HELP") {
+	if !strings.Contains(body, "# HELP") {
 		t.Error("Response should contain Prometheus HELP comments")
 	}
 
-	if !containsString(body, "# TYPE") {
+	if !strings.Contains(body, "# TYPE") {
 		t.Error("Response should contain Prometheus TYPE comments")
 	}
 }
@@ -508,7 +509,7 @@ func TestMetricsEndpoint_ContainsExpectedMetrics(t *testing.T) {
 	}
 
 	for _, metric := range expectedMetrics {
-		if !containsString(bodyStr, metric) {
+		if !strings.Contains(bodyStr, metric) {
 			t.Errorf("Response should contain metric: %s", metric)
 		}
 	}
@@ -551,7 +552,7 @@ func TestMetricsEndpoint_UpdatesFromStorage(t *testing.T) {
 	body1 := w1.Body.String()
 
 	// Check that jwt_parent_tokens_active_total shows 1
-	if !containsString(body1, "jwt_parent_tokens_active_total 1") {
+	if !strings.Contains(body1, "jwt_parent_tokens_active_total 1") {
 		t.Error("First metrics request should show 1 active parent token")
 	}
 
@@ -586,21 +587,7 @@ func TestMetricsEndpoint_UpdatesFromStorage(t *testing.T) {
 	body3 := w3.Body.String()
 
 	// Check that jwt_parent_tokens_active_total now shows 2
-	if !containsString(body3, "jwt_parent_tokens_active_total 2") {
+	if !strings.Contains(body3, "jwt_parent_tokens_active_total 2") {
 		t.Error("Second metrics request should show 2 active parent tokens, got: " + body3)
 	}
-}
-
-// Helper function to check if a string contains a substring
-func containsString(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) >= len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsStringHelper(s, substr)))
-}
-
-func containsStringHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
