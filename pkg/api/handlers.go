@@ -7,16 +7,19 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/klazomenai/jwt-auth-service/pkg/auth"
-	"github.com/klazomenai/jwt-auth-service/pkg/storage"
 	"github.com/gorilla/mux"
+	"github.com/klazomenai/jwt-auth-service/pkg/auth"
+	"github.com/klazomenai/jwt-auth-service/pkg/metrics"
+	"github.com/klazomenai/jwt-auth-service/pkg/storage"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Server represents the HTTP API server
 type Server struct {
-	jwtService *auth.JWTService
-	store      *storage.RedisStore
-	router     *mux.Router
+	jwtService       *auth.JWTService
+	store            *storage.RedisStore
+	router           *mux.Router
+	metricsCollector *metrics.Collector
 }
 
 // TokenRequest represents a token creation request
@@ -44,9 +47,10 @@ type ErrorResponse struct {
 // NewServer creates a new API server
 func NewServer(jwtService *auth.JWTService, store *storage.RedisStore) *Server {
 	s := &Server{
-		jwtService: jwtService,
-		store:      store,
-		router:     mux.NewRouter(),
+		jwtService:       jwtService,
+		store:            store,
+		router:           mux.NewRouter(),
+		metricsCollector: metrics.NewCollector(store),
 	}
 
 	// Setup routes
@@ -61,6 +65,7 @@ func NewServer(jwtService *auth.JWTService, store *storage.RedisStore) *Server {
 	s.router.HandleFunc("/.well-known/jwks.json", s.GetJWKS).Methods("GET")
 	s.router.HandleFunc("/health", s.Health).Methods("GET")
 	s.router.HandleFunc("/healthz", s.Health).Methods("GET")
+	s.router.Handle("/metrics", s.metricsHandler()).Methods("GET")
 
 	return s
 }
@@ -555,6 +560,17 @@ func (s *Server) StreamTokenUpdates(w http.ResponseWriter, r *http.Request) {
 // Router returns the HTTP router
 func (s *Server) Router() *mux.Router {
 	return s.router
+}
+
+// metricsHandler returns an HTTP handler for Prometheus metrics
+// It updates metrics from storage on each scrape to ensure fresh data
+func (s *Server) metricsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Update metrics from current storage state
+		s.metricsCollector.UpdateMetrics()
+		// Serve Prometheus metrics
+		promhttp.Handler().ServeHTTP(w, r)
+	})
 }
 
 // Helper methods
