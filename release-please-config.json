@@ -5,6 +5,7 @@
   "prerelease-type": "alpha",
   "versioning-strategy": "prerelease",
   "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
   "include-v-in-tag": true,
   "include-component-in-tag": false,
   "changelog-sections": [
