@@ -84,6 +84,7 @@ func main() {
 	log.Printf("  DELETE /users/:userID/tokens - Revoke all user tokens")
 	log.Printf("  GET    /.well-known/jwks.json - JWK Set")
 	log.Printf("  GET    /health - Health check")
+	log.Printf("  GET    /metrics - Prometheus metrics")
 
 	srv := &http.Server{
 		Addr:         addr,

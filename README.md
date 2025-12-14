@@ -216,6 +216,21 @@ GET /.well-known/jwks.json
 GET /health
 ```
 
+#### Prometheus Metrics
+
+```bash
+GET /metrics
+```
+
+Returns Prometheus-formatted metrics for monitoring token lifecycle:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `jwt_parent_token_expiry_timestamp_seconds` | Gauge | user_id, network, parent_jti | Unix timestamp when parent token expires |
+| `jwt_parent_token_issued_timestamp_seconds` | Gauge | user_id, network, parent_jti | Unix timestamp when parent token was issued |
+| `jwt_parent_tokens_active_total` | Gauge | - | Total number of active parent tokens |
+| `jwt_revoked_tokens_total` | Gauge | - | Total number of revoked tokens |
+
 #### External Authorization (Envoy/Istio)
 
 ```bash
