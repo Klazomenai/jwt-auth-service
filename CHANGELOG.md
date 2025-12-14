@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.0-alpha.0...v0.1.1-alpha.0) (2025-12-14)
+
+
+### Added
+
+* add prometheus /metrics endpoint for token lifecycle monitoring ([#12](https://github.com/Klazomenai/jwt-auth-service/issues/12)) ([3000651](https://github.com/Klazomenai/jwt-auth-service/commit/300065106968a135fd0eaff2f3b408c794272025)), closes [#1](https://github.com/Klazomenai/jwt-auth-service/issues/1)
+
+
+### Fixed
+
+* **release:** add bump-patch-for-minor-pre-major for prerelease versioning ([7b75de9](https://github.com/Klazomenai/jwt-auth-service/commit/7b75de93edc081cd9903d556706a6416bf811e54))
+* **release:** use prerelease versioning strategy for alpha releases ([58b06f7](https://github.com/Klazomenai/jwt-auth-service/commit/58b06f71e5cabeba7ee7bedb1e3e03cb11a79e09))
+
 ## [0.1.0-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.0.1-alpha.0...v0.1.0-alpha.0) (2025-12-07)
 
 
