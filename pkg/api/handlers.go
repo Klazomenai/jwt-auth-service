@@ -62,6 +62,8 @@ func NewServer(jwtService *auth.JWTService, store *storage.RedisStore) *Server {
 	s.router.HandleFunc("/tokens/{tokenID}", s.RevokeToken).Methods("DELETE")
 	s.router.HandleFunc("/users/{userID}/tokens", s.RevokeUserTokens).Methods("DELETE")
 	s.router.HandleFunc("/authorize", s.Authorize).Methods("POST", "GET", "HEAD")
+	s.router.HandleFunc("/csrf", s.GenerateCSRFToken).Methods("GET")
+	s.router.HandleFunc("/validate-csrf", s.ValidateCSRFToken).Methods("POST")
 	s.router.HandleFunc("/.well-known/jwks.json", s.GetJWKS).Methods("GET")
 	s.router.HandleFunc("/health", s.Health).Methods("GET")
 	s.router.HandleFunc("/healthz", s.Health).Methods("GET")

@@ -202,6 +202,51 @@ GET /tokens/latest?parent_jti=<parent-jti>
 GET /tokens/stream?parent_jti=<parent-jti>
 ```
 
+### CSRF Token Management
+
+#### Generate CSRF Token
+
+```bash
+GET /csrf
+```
+
+**Response**:
+```json
+{
+  "token": "base64-encoded-token",
+  "expires_at": "2026-02-03T12:30:00Z"
+}
+```
+
+**Properties**:
+- Cryptographically secure (crypto/rand, 32 bytes)
+- 5-minute TTL
+- Stored in Redis
+
+#### Validate CSRF Token
+
+```bash
+POST /validate-csrf
+Content-Type: application/json
+
+{
+  "token": "base64-encoded-token"
+}
+```
+
+**Response**:
+```json
+{
+  "valid": true,
+  "message": "CSRF token valid"
+}
+```
+
+**Properties**:
+- One-time use (consumed after validation)
+- Atomic validation (Redis GETDEL)
+- Returns 401 if invalid/expired/already used
+
 ### Service Endpoints
 
 #### JWKS (Public Key)

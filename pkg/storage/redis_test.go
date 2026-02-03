@@ -426,3 +426,218 @@ func TestConcurrentOperations(t *testing.T) {
 		t.Errorf("Expected %d tokens, got %d", numTokens, len(tokens))
 	}
 }
+
+// TestStoreCSRFToken tests CSRF token storage
+func TestStoreCSRFToken(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+	token := "test-csrf-token-12345"
+	ttl := 5 * time.Minute
+
+	// Store CSRF token
+	err := store.StoreCSRFToken(ctx, token, ttl)
+	if err != nil {
+		t.Fatalf("Failed to store CSRF token: %v", err)
+	}
+
+	// Verify token exists in Redis
+	key := csrfTokenPrefix + token
+	val, err := store.client.Get(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("Failed to get CSRF token from Redis: %v", err)
+	}
+
+	if val != "1" {
+		t.Errorf("Expected value '1', got '%s'", val)
+	}
+
+	// Verify TTL is set
+	ttlResult := store.client.TTL(ctx, key).Val()
+	if ttlResult <= 0 {
+		t.Errorf("Expected TTL > 0, got %v", ttlResult)
+	}
+}
+
+// TestValidateAndConsumeCSRFToken tests CSRF token validation and consumption
+func TestValidateAndConsumeCSRFToken(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		token      string
+		storeFirst bool
+		wantValid  bool
+		wantErr    bool
+	}{
+		{
+			name:       "valid token",
+			token:      "valid-token-123",
+			storeFirst: true,
+			wantValid:  true,
+			wantErr:    false,
+		},
+		{
+			name:       "token not found",
+			token:      "nonexistent-token",
+			storeFirst: false,
+			wantValid:  false,
+			wantErr:    false,
+		},
+		{
+			name:       "empty token",
+			token:      "",
+			storeFirst: false,
+			wantValid:  false,
+			wantErr:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Store token if needed
+			if tt.storeFirst {
+				err := store.StoreCSRFToken(ctx, tt.token, 5*time.Minute)
+				if err != nil {
+					t.Fatalf("Failed to store CSRF token: %v", err)
+				}
+			}
+
+			// Validate and consume
+			valid, err := store.ValidateAndConsumeCSRFToken(ctx, tt.token)
+
+			if tt.wantErr && err == nil {
+				t.Error("Expected error but got none")
+			}
+
+			if !tt.wantErr && err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			if valid != tt.wantValid {
+				t.Errorf("Expected valid=%v, got %v", tt.wantValid, valid)
+			}
+
+			// Verify token was deleted if it was valid
+			if tt.wantValid && tt.storeFirst {
+				key := csrfTokenPrefix + tt.token
+				exists, err := store.client.Exists(ctx, key).Result()
+				if err != nil {
+					t.Fatalf("Failed to check token existence: %v", err)
+				}
+				if exists > 0 {
+					t.Error("Token should have been deleted after consumption")
+				}
+			}
+		})
+	}
+}
+
+// TestValidateAndConsumeCSRFToken_OneTimeUse tests that tokens can only be used once
+func TestValidateAndConsumeCSRFToken_OneTimeUse(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+	token := "one-time-token-456"
+
+	// Store token
+	err := store.StoreCSRFToken(ctx, token, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Failed to store CSRF token: %v", err)
+	}
+
+	// First validation should succeed
+	valid, err := store.ValidateAndConsumeCSRFToken(ctx, token)
+	if err != nil {
+		t.Fatalf("First validation failed: %v", err)
+	}
+	if !valid {
+		t.Error("First validation should be valid")
+	}
+
+	// Second validation should fail (token already consumed)
+	valid, err = store.ValidateAndConsumeCSRFToken(ctx, token)
+	if err != nil {
+		t.Fatalf("Second validation failed: %v", err)
+	}
+	if valid {
+		t.Error("Second validation should fail (one-time use)")
+	}
+}
+
+// TestCSRFTokenExpiry tests that CSRF tokens expire after TTL
+func TestCSRFTokenExpiry(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+	token := "expiring-token-789"
+	ttl := 100 * time.Millisecond // Short TTL for testing
+
+	// Store token with short TTL
+	err := store.StoreCSRFToken(ctx, token, ttl)
+	if err != nil {
+		t.Fatalf("Failed to store CSRF token: %v", err)
+	}
+
+	// Fast-forward time in miniredis
+	mr.FastForward(200 * time.Millisecond)
+
+	// Validation should fail (token expired)
+	valid, err := store.ValidateAndConsumeCSRFToken(ctx, token)
+	if err != nil {
+		t.Fatalf("Validation failed with error: %v", err)
+	}
+	if valid {
+		t.Error("Validation should fail for expired token")
+	}
+}
+
+// TestCSRFTokenConcurrent tests concurrent CSRF token operations
+func TestCSRFTokenConcurrent(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+	token := "concurrent-token-abc"
+
+	// Store token
+	err := store.StoreCSRFToken(ctx, token, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Failed to store CSRF token: %v", err)
+	}
+
+	// Try to consume the same token concurrently from 10 goroutines
+	numGoroutines := 10
+	successChan := make(chan bool, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			valid, _ := store.ValidateAndConsumeCSRFToken(ctx, token)
+			successChan <- valid
+		}()
+	}
+
+	// Collect results
+	successCount := 0
+	for i := 0; i < numGoroutines; i++ {
+		if <-successChan {
+			successCount++
+		}
+	}
+
+	// Only one goroutine should have successfully consumed the token
+	if successCount != 1 {
+		t.Errorf("Expected exactly 1 successful consumption, got %d", successCount)
+	}
+}
