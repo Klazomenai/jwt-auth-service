@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -20,6 +21,8 @@ const (
 	latestAccessTokenPrefix = "auto_renew:latest:"
 	// Key for set of all active auto-renewal renewal JTIs
 	autoRenewalSetKey = "auto_renew:active_set"
+	// Key prefix for CSRF tokens
+	csrfTokenPrefix = "csrf:token:"
 )
 
 // RedisStore handles token storage and revocation
@@ -266,6 +269,30 @@ func (s *RedisStore) GetLatestChildToken(ctx context.Context, parentJTI string) 
 	}
 
 	return &token, nil
+}
+
+// StoreCSRFToken stores a CSRF token in Redis with TTL
+func (s *RedisStore) StoreCSRFToken(ctx context.Context, token string, ttl time.Duration) error {
+	key := csrfTokenPrefix + token
+	return s.client.Set(ctx, key, "1", ttl).Err()
+}
+
+// ValidateAndConsumeCSRFToken checks if a CSRF token exists and deletes it (one-time use)
+// Uses GETDEL for atomic get-and-delete operation to prevent race conditions
+func (s *RedisStore) ValidateAndConsumeCSRFToken(ctx context.Context, token string) (bool, error) {
+	key := csrfTokenPrefix + token
+
+	// Atomic get-and-delete operation
+	val, err := s.client.GetDel(ctx, key).Result()
+	if err == redis.Nil {
+		return false, nil // Token not found or already consumed
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to validate and consume CSRF token: %w", err)
+	}
+
+	// Use constant-time comparison to prevent timing attacks
+	return subtle.ConstantTimeCompare([]byte(val), []byte("1")) == 1, nil
 }
 
 // Close closes the Redis connection

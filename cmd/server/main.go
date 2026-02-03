@@ -82,6 +82,8 @@ func main() {
 	log.Printf("  GET    /tokens/stream?parent_jti=<jti> - Stream child token updates (SSE)")
 	log.Printf("  DELETE /tokens/:parent_jti - Revoke parent token")
 	log.Printf("  DELETE /users/:userID/tokens - Revoke all user tokens")
+	log.Printf("  GET    /csrf - Generate CSRF token (5min TTL)")
+	log.Printf("  POST   /validate-csrf - Validate CSRF token (one-time use)")
 	log.Printf("  GET    /.well-known/jwks.json - JWK Set")
 	log.Printf("  GET    /health - Health check")
 	log.Printf("  GET    /metrics - Prometheus metrics")
