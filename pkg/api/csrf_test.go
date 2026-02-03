@@ -3,12 +3,22 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+// generateTestToken creates a deterministic base64-encoded 32-byte token for testing
+func generateTestToken(pattern byte) string {
+	tokenBytes := make([]byte, 32)
+	for i := range tokenBytes {
+		tokenBytes[i] = pattern
+	}
+	return base64.URLEncoding.EncodeToString(tokenBytes)
+}
 
 // TestGenerateCSRFToken tests the CSRF token generation endpoint
 func TestGenerateCSRFToken(t *testing.T) {
@@ -106,8 +116,8 @@ func TestValidateCSRFToken(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Generate a valid token
-	validToken := "test-valid-token-123"
+	// Generate a valid token (base64-encoded 32 bytes)
+	validToken := generateTestToken(0xAA)
 	if err := server.store.StoreCSRFToken(ctx, validToken, 5*time.Minute); err != nil {
 		t.Fatalf("Failed to store valid token: %v", err)
 	}
@@ -129,7 +139,7 @@ func TestValidateCSRFToken(t *testing.T) {
 		{
 			name: "invalid token",
 			requestBody: CSRFValidateRequest{
-				Token: "nonexistent-token",
+				Token: generateTestToken(0xBB), // Valid format but not stored
 			},
 			wantStatusCode: http.StatusUnauthorized,
 			wantValid:      false,
@@ -145,6 +155,46 @@ func TestValidateCSRFToken(t *testing.T) {
 		{
 			name:           "invalid JSON",
 			requestBody:    "invalid json",
+			wantStatusCode: http.StatusBadRequest,
+			wantValid:      false,
+		},
+		{
+			name: "token too long",
+			requestBody: CSRFValidateRequest{
+				Token: generateTestToken(0xEE) + generateTestToken(0xEE) + generateTestToken(0xEE), // >100 chars
+			},
+			wantStatusCode: http.StatusBadRequest,
+			wantValid:      false,
+		},
+		{
+			name: "token with whitespace",
+			requestBody: CSRFValidateRequest{
+				Token: "AAAA BBBB CCCC DDDD",
+			},
+			wantStatusCode: http.StatusBadRequest,
+			wantValid:      false,
+		},
+		{
+			name: "malformed base64",
+			requestBody: CSRFValidateRequest{
+				Token: "not-valid-base64!@#$",
+			},
+			wantStatusCode: http.StatusBadRequest,
+			wantValid:      false,
+		},
+		{
+			name: "wrong decoded length (16 bytes)",
+			requestBody: CSRFValidateRequest{
+				Token: base64.URLEncoding.EncodeToString(make([]byte, 16)),
+			},
+			wantStatusCode: http.StatusBadRequest,
+			wantValid:      false,
+		},
+		{
+			name: "wrong decoded length (64 bytes)",
+			requestBody: CSRFValidateRequest{
+				Token: base64.URLEncoding.EncodeToString(make([]byte, 64)),
+			},
 			wantStatusCode: http.StatusBadRequest,
 			wantValid:      false,
 		},
@@ -197,8 +247,8 @@ func TestValidateCSRFToken_OneTimeUse(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Store a token
-	token := "one-time-token-456"
+	// Store a token (base64-encoded 32 bytes)
+	token := generateTestToken(0xCC)
 	if err := server.store.StoreCSRFToken(ctx, token, 5*time.Minute); err != nil {
 		t.Fatalf("Failed to store token: %v", err)
 	}
@@ -248,8 +298,8 @@ func TestValidateCSRFToken_ExpiredToken(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Store token with short TTL
-	token := "expiring-token-789"
+	// Store token with short TTL (base64-encoded 32 bytes)
+	token := generateTestToken(0xDD)
 	if err := server.store.StoreCSRFToken(ctx, token, 100*time.Millisecond); err != nil {
 		t.Fatalf("Failed to store token: %v", err)
 	}
@@ -275,5 +325,53 @@ func TestValidateCSRFToken_ExpiredToken(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp.Valid {
 		t.Error("Expired token should be invalid")
+	}
+}
+
+// TestGenerateCSRFToken_RedisFailure tests Redis errors during token generation
+func TestGenerateCSRFToken_RedisFailure(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	// Close Redis to simulate connection failure
+	mr.Close()
+
+	req := httptest.NewRequest("GET", "/csrf", nil)
+	w := httptest.NewRecorder()
+
+	server.GenerateCSRFToken(w, req)
+
+	// Should return 500 Internal Server Error when Redis is down
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 for Redis failure, got %d", w.Code)
+	}
+}
+
+// TestValidateCSRFToken_RedisFailure tests Redis errors during token validation
+func TestValidateCSRFToken_RedisFailure(t *testing.T) {
+	server, mr := setupTestServer(t)
+
+	// Store a valid token first
+	ctx := context.Background()
+	token := generateTestToken(0xFF)
+	if err := server.store.StoreCSRFToken(ctx, token, 5*time.Minute); err != nil {
+		t.Fatalf("Failed to store token: %v", err)
+	}
+
+	// Close Redis to simulate connection failure
+	mr.Close()
+
+	reqBody := CSRFValidateRequest{Token: token}
+	body, _ := json.Marshal(reqBody)
+
+	req := httptest.NewRequest("POST", "/validate-csrf", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.ValidateCSRFToken(w, req)
+
+	// Should return 500 Internal Server Error when Redis is down
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 for Redis failure, got %d", w.Code)
 	}
 }

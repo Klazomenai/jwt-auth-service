@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -83,6 +84,27 @@ func (s *Server) ValidateCSRFToken(w http.ResponseWriter, r *http.Request) {
 		resp := CSRFValidateResponse{
 			Valid:   false,
 			Message: "token field is required",
+		}
+		s.sendJSON(w, http.StatusBadRequest, resp)
+		return
+	}
+
+	// Validate token format: must be base64-encoded and decode to csrfTokenLength bytes
+	// Expected length: base64-encoded 32 bytes = 44 characters (with padding)
+	if len(req.Token) > 100 || strings.ContainsAny(req.Token, "\n\r\t ") {
+		resp := CSRFValidateResponse{
+			Valid:   false,
+			Message: "invalid token format",
+		}
+		s.sendJSON(w, http.StatusBadRequest, resp)
+		return
+	}
+
+	decodedToken, err := base64.URLEncoding.DecodeString(req.Token)
+	if err != nil || len(decodedToken) != csrfTokenLength {
+		resp := CSRFValidateResponse{
+			Valid:   false,
+			Message: "invalid token format",
 		}
 		s.sendJSON(w, http.StatusBadRequest, resp)
 		return
