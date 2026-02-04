@@ -154,13 +154,14 @@ func (w *Worker) processConfig(ctx context.Context, config *storage.AutoRenewalC
 		return false, nil
 	}
 
-	// Generate new child token
+	// Generate new child token with parent linkage
 	childExpiry := time.Duration(config.ChildExpiry) * time.Second
-	newChildToken, newChildJTI, err := w.jwtService.CreateToken(
+	newChildToken, newChildJTI, err := w.jwtService.CreateChildToken(
 		config.UserID,
 		config.Network,
 		config.RateLimit,
 		childExpiry,
+		config.ParentJTI,
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to create new child token: %w", err)
@@ -181,6 +182,11 @@ func (w *Worker) processConfig(ctx context.Context, config *storage.AutoRenewalC
 	// Track new child token for user (for revocation purposes)
 	if err := w.store.TrackUserToken(ctx, config.UserID, newChildJTI, childExpiry); err != nil {
 		log.Printf("⚠️  Warning: Failed to track renewed child token: %v", err)
+	}
+
+	// Track child→parent relationship for cascade revocation
+	if err := w.store.TrackChildToken(ctx, config.ParentJTI, newChildJTI, time.Until(config.ParentExpiry)); err != nil {
+		return false, fmt.Errorf("failed to track child token for cascade: %w", err)
 	}
 
 	log.Printf("✅ Child token auto-generated: user=%s, parent_jti=%s, child_jti=%s, expires_at=%s",

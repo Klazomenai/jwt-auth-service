@@ -215,6 +215,39 @@ func (s *JWTService) CreateTokenPair(userID, network string, rateLimit int, chil
 	return response, nil
 }
 
+// CreateChildToken creates a child JWT token linked to a parent token via parent_jti claim.
+// Unlike CreateToken, this always sets TokenType to "child" and includes the ParentJTI claim.
+func (s *JWTService) CreateChildToken(userID, network string, rateLimit int, expiry time.Duration, parentJTI string) (string, string, error) {
+	now := time.Now()
+	tokenID := uuid.New().String()
+
+	claims := TokenClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    s.issuer,
+			Subject:   fmt.Sprintf("user_%s", userID),
+			Audience:  jwt.ClaimStrings{s.audience},
+			ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ID:        tokenID,
+		},
+		Network:   network,
+		RateLimit: rateLimit,
+		UserID:    userID,
+		TokenType: TokenTypeChild,
+		ParentJTI: parentJTI,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = KeyID
+
+	signedToken, err := token.SignedString(s.privateKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to sign child token: %w", err)
+	}
+
+	return signedToken, tokenID, nil
+}
+
 // ValidateToken validates a JWT token and returns the claims
 func (s *JWTService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {

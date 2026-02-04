@@ -351,6 +351,114 @@ func TestProcessConfig_ErrorHandling(t *testing.T) {
 	}
 }
 
+func TestProcessConfig_SetsParentJTI(t *testing.T) {
+	worker, store, jwtService, mr := setupTestWorker(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+
+	parentJTI := "parent-jti-linkage-test"
+	config := &storage.AutoRenewalConfig{
+		ParentJTI:    parentJTI,
+		UserID:       "test-user",
+		Network:      "testnet",
+		RateLimit:    100,
+		ChildExpiry:  900,
+		ParentExpiry: time.Now().Add(24 * time.Hour),
+		CreatedAt:    time.Now(),
+	}
+
+	err := store.StoreAutoRenewalConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("Failed to store auto-renewal config: %v", err)
+	}
+
+	// Process renewals to generate child token
+	worker.processRenewals()
+
+	// Get generated child token
+	latestChild, err := store.GetLatestChildToken(ctx, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to get latest child token: %v", err)
+	}
+
+	if latestChild == nil {
+		t.Fatal("Expected child token to be generated")
+	}
+
+	// Validate the child token and check parent_jti claim
+	claims, err := jwtService.ValidateToken(latestChild.ChildToken)
+	if err != nil {
+		t.Fatalf("Failed to validate child token: %v", err)
+	}
+
+	if claims.ParentJTI != parentJTI {
+		t.Errorf("Expected parent_jti %q, got %q", parentJTI, claims.ParentJTI)
+	}
+
+	if claims.TokenType != auth.TokenTypeChild {
+		t.Errorf("Expected token_type %q, got %q", auth.TokenTypeChild, claims.TokenType)
+	}
+}
+
+func TestProcessConfig_TracksChildToken(t *testing.T) {
+	worker, store, _, mr := setupTestWorker(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+
+	parentJTI := "parent-jti-tracking-test"
+	config := &storage.AutoRenewalConfig{
+		ParentJTI:    parentJTI,
+		UserID:       "test-user",
+		Network:      "testnet",
+		RateLimit:    100,
+		ChildExpiry:  900,
+		ParentExpiry: time.Now().Add(24 * time.Hour),
+		CreatedAt:    time.Now(),
+	}
+
+	err := store.StoreAutoRenewalConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("Failed to store auto-renewal config: %v", err)
+	}
+
+	// Process renewals to generate child token
+	worker.processRenewals()
+
+	// Get the child JTI from latest child token
+	latestChild, err := store.GetLatestChildToken(ctx, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to get latest child token: %v", err)
+	}
+
+	if latestChild == nil {
+		t.Fatal("Expected child token to be generated")
+	}
+
+	// Verify child JTI is tracked in parent:children set
+	children, err := store.GetChildTokens(ctx, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to get child tokens: %v", err)
+	}
+
+	if len(children) == 0 {
+		t.Fatal("Expected at least one child token tracked")
+	}
+
+	found := false
+	for _, childJTI := range children {
+		if childJTI == latestChild.ChildJTI {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected child JTI %q to be tracked under parent %q", latestChild.ChildJTI, parentJTI)
+	}
+}
+
 func TestWorkerConfig_Validation(t *testing.T) {
 	tests := []struct {
 		name             string
