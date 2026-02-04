@@ -23,6 +23,8 @@ const (
 	autoRenewalSetKey = "auto_renew:active_set"
 	// Key prefix for CSRF tokens
 	csrfTokenPrefix = "csrf:token:"
+	// Key prefix for parent→children tracking (cascade revocation)
+	parentChildrenPrefix = "parent:children:"
 )
 
 // RedisStore handles token storage and revocation
@@ -293,6 +295,59 @@ func (s *RedisStore) ValidateAndConsumeCSRFToken(ctx context.Context, token stri
 
 	// Use constant-time comparison to prevent timing attacks
 	return subtle.ConstantTimeCompare([]byte(val), []byte("1")) == 1, nil
+}
+
+// TrackChildToken associates a child JTI with its parent JTI for cascade revocation.
+// Uses a Redis SET keyed by parent JTI with TTL matching parent token lifetime.
+func (s *RedisStore) TrackChildToken(ctx context.Context, parentJTI, childJTI string, ttl time.Duration) error {
+	key := parentChildrenPrefix + parentJTI
+
+	if err := s.client.SAdd(ctx, key, childJTI).Err(); err != nil {
+		return fmt.Errorf("failed to track child token: %w", err)
+	}
+
+	if err := s.client.Expire(ctx, key, ttl).Err(); err != nil {
+		return fmt.Errorf("failed to set expiry on child token set: %w", err)
+	}
+
+	return nil
+}
+
+// GetChildTokens retrieves all tracked child JTIs for a parent token.
+func (s *RedisStore) GetChildTokens(ctx context.Context, parentJTI string) ([]string, error) {
+	key := parentChildrenPrefix + parentJTI
+	children, err := s.client.SMembers(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child tokens: %w", err)
+	}
+	return children, nil
+}
+
+// RevokeChildTokens revokes all child tokens tracked under a parent JTI.
+// Returns the number of child tokens revoked.
+func (s *RedisStore) RevokeChildTokens(ctx context.Context, parentJTI string, ttl time.Duration) (int, error) {
+	children, err := s.GetChildTokens(ctx, parentJTI)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(children) == 0 {
+		return 0, nil
+	}
+
+	for _, childJTI := range children {
+		if err := s.RevokeToken(ctx, childJTI, ttl); err != nil {
+			return 0, fmt.Errorf("failed to revoke child token %s: %w", childJTI, err)
+		}
+	}
+
+	// Clean up the tracking set
+	key := parentChildrenPrefix + parentJTI
+	if err := s.client.Del(ctx, key).Err(); err != nil {
+		return len(children), fmt.Errorf("failed to delete child token set: %w", err)
+	}
+
+	return len(children), nil
 }
 
 // Close closes the Redis connection

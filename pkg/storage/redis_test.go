@@ -641,3 +641,156 @@ func TestCSRFTokenConcurrent(t *testing.T) {
 		t.Errorf("Expected exactly 1 successful consumption, got %d", successCount)
 	}
 }
+
+func TestTrackChildToken(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+	parentJTI := "parent-abc-123"
+	childJTI := "child-xyz-456"
+	ttl := 30 * 24 * time.Hour
+
+	err := store.TrackChildToken(ctx, parentJTI, childJTI, ttl)
+	if err != nil {
+		t.Fatalf("Failed to track child token: %v", err)
+	}
+
+	// Verify child is in the parent's set
+	key := parentChildrenPrefix + parentJTI
+	isMember, err := store.client.SIsMember(ctx, key, childJTI).Result()
+	if err != nil {
+		t.Fatalf("Failed to check set membership: %v", err)
+	}
+
+	if !isMember {
+		t.Error("Child token not found in parent's children set")
+	}
+
+	// Verify TTL is set
+	ttlResult := store.client.TTL(ctx, key).Val()
+	if ttlResult <= 0 {
+		t.Errorf("Expected TTL > 0, got %v", ttlResult)
+	}
+}
+
+func TestGetChildTokens(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+	parentJTI := "parent-abc-123"
+	children := []string{"child-1", "child-2", "child-3"}
+	ttl := 30 * 24 * time.Hour
+
+	for _, childJTI := range children {
+		err := store.TrackChildToken(ctx, parentJTI, childJTI, ttl)
+		if err != nil {
+			t.Fatalf("Failed to track child token: %v", err)
+		}
+	}
+
+	retrieved, err := store.GetChildTokens(ctx, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to get child tokens: %v", err)
+	}
+
+	if len(retrieved) != len(children) {
+		t.Errorf("Expected %d children, got %d", len(children), len(retrieved))
+	}
+
+	childMap := make(map[string]bool)
+	for _, c := range retrieved {
+		childMap[c] = true
+	}
+
+	for _, expected := range children {
+		if !childMap[expected] {
+			t.Errorf("Expected child %q not found in results", expected)
+		}
+	}
+}
+
+func TestGetChildTokens_NoChildren(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+
+	children, err := store.GetChildTokens(ctx, "nonexistent-parent")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(children) != 0 {
+		t.Errorf("Expected 0 children, got %d", len(children))
+	}
+}
+
+func TestRevokeChildTokens(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+	parentJTI := "parent-abc-123"
+	children := []string{"child-1", "child-2", "child-3"}
+	ttl := 30 * 24 * time.Hour
+
+	for _, childJTI := range children {
+		err := store.TrackChildToken(ctx, parentJTI, childJTI, ttl)
+		if err != nil {
+			t.Fatalf("Failed to track child token: %v", err)
+		}
+	}
+
+	count, err := store.RevokeChildTokens(ctx, parentJTI, ttl)
+	if err != nil {
+		t.Fatalf("Failed to revoke child tokens: %v", err)
+	}
+
+	if count != len(children) {
+		t.Errorf("Expected %d revoked, got %d", len(children), count)
+	}
+
+	// Verify all children are revoked
+	for _, childJTI := range children {
+		isRevoked, err := store.IsTokenRevoked(ctx, childJTI)
+		if err != nil {
+			t.Fatalf("Failed to check revocation: %v", err)
+		}
+		if !isRevoked {
+			t.Errorf("Child %q should be revoked", childJTI)
+		}
+	}
+
+	// Verify the tracking set was cleaned up
+	key := parentChildrenPrefix + parentJTI
+	exists, err := store.client.Exists(ctx, key).Result()
+	if err != nil {
+		t.Fatalf("Failed to check key existence: %v", err)
+	}
+	if exists != 0 {
+		t.Error("Child tracking set should be deleted after cascade revocation")
+	}
+}
+
+func TestRevokeChildTokens_NoChildren(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+
+	count, err := store.RevokeChildTokens(ctx, "nonexistent-parent", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("Expected 0 revoked, got %d", count)
+	}
+}
