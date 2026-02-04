@@ -302,7 +302,7 @@ func (s *Server) RevokeToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cascade: revoke all child tokens of this parent
-	childCount, err := s.store.RevokeChildTokens(ctx, tokenID, 30*24*time.Hour)
+	childCount, err := s.store.RevokeChildTokens(ctx, tokenID, auth.DefaultParentTokenExpiry)
 	if err != nil {
 		fmt.Printf("Warning: Failed to cascade revoke child tokens for %s: %v\n", tokenID, err)
 	} else if childCount > 0 {
