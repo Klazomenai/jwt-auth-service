@@ -84,6 +84,7 @@ func main() {
 	log.Printf("  DELETE /users/:userID/tokens - Revoke all user tokens")
 	log.Printf("  GET    /csrf - Generate CSRF token (5min TTL)")
 	log.Printf("  POST   /validate-csrf - Validate CSRF token (one-time use)")
+	log.Printf("  POST   /api/validate - Validate JWT and set session cookie")
 	log.Printf("  GET    /.well-known/jwks.json - JWK Set")
 	log.Printf("  GET    /health - Health check")
 	log.Printf("  GET    /metrics - Prometheus metrics")
