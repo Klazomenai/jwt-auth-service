@@ -250,9 +250,9 @@ func (s *Server) RenewToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create new child token with same claims but short expiry
+	// Create new child token linked to parent
 	childExpiry := auth.DefaultChildTokenExpiry
-	newChildToken, childJTI, err := s.jwtService.CreateToken(claims.UserID, claims.Network, claims.RateLimit, childExpiry)
+	newChildToken, childJTI, err := s.jwtService.CreateChildToken(claims.UserID, claims.Network, claims.RateLimit, childExpiry, parentJTI)
 	if err != nil {
 		s.sendError(w, http.StatusInternalServerError, "Failed to create child token", err.Error())
 		return
@@ -261,6 +261,11 @@ func (s *Server) RenewToken(w http.ResponseWriter, r *http.Request) {
 	// Track new child token
 	if err := s.store.TrackUserToken(ctx, claims.UserID, childJTI, childExpiry); err != nil {
 		fmt.Printf("Warning: Failed to track renewed child token: %v\n", err)
+	}
+
+	// Track child→parent relationship for cascade revocation
+	if err := s.store.TrackChildToken(ctx, parentJTI, childJTI, auth.DefaultParentTokenExpiry); err != nil {
+		fmt.Printf("Warning: Failed to track child token for cascade: %v\n", err)
 	}
 
 	// Log successful renewal
@@ -295,6 +300,17 @@ func (s *Server) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		s.sendError(w, http.StatusInternalServerError, "Failed to revoke token", err.Error())
 		return
 	}
+
+	// Cascade: revoke all child tokens of this parent
+	childCount, err := s.store.RevokeChildTokens(ctx, tokenID, 30*24*time.Hour)
+	if err != nil {
+		fmt.Printf("Warning: Failed to cascade revoke child tokens for %s: %v\n", tokenID, err)
+	} else if childCount > 0 {
+		fmt.Printf("Cascade revocation: revoked %d child tokens for parent %s\n", childCount, tokenID)
+	}
+
+	// Stop auto-renewal if this was a parent token
+	_ = s.store.DeleteAutoRenewalConfig(ctx, tokenID)
 
 	w.WriteHeader(http.StatusNoContent)
 }
