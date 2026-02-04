@@ -411,6 +411,18 @@ func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If this is a child token, also check if parent has been revoked
+	if claims.ParentJTI != "" {
+		parentRevoked, err := s.store.IsTokenRevoked(ctx, claims.ParentJTI)
+		if err != nil {
+			// Log error but allow request (fail open for availability)
+			fmt.Printf("Error checking parent token revocation: %v\n", err)
+		} else if parentRevoked {
+			s.sendError(w, http.StatusForbidden, "Parent token has been revoked", "")
+			return
+		}
+	}
+
 	// Token is valid and not revoked - allow request
 	w.WriteHeader(http.StatusOK)
 }

@@ -582,3 +582,163 @@ func TestMetricsEndpoint_UpdatesFromStorage(t *testing.T) {
 		t.Error("Second metrics request should show 2 active parent tokens, got: " + body3)
 	}
 }
+
+func TestRevokeToken_CascadesToChildren(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+
+	// Create a parent token pair
+	tokenPair, err := server.jwtService.CreateTokenPair("alice", "testnet", 100,
+		auth.DefaultChildTokenExpiry, auth.DefaultParentTokenExpiry, true)
+	if err != nil {
+		t.Fatalf("Failed to create token pair: %v", err)
+	}
+
+	parentJTI := tokenPair.ParentJTI
+	childJTI := tokenPair.ChildJTI
+
+	// Track child under parent for cascade
+	err = server.store.TrackChildToken(ctx, parentJTI, childJTI, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to track child token: %v", err)
+	}
+
+	// Revoke parent via API
+	req := httptest.NewRequest("DELETE", "/tokens/"+parentJTI, nil)
+	w := httptest.NewRecorder()
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204, got %d", w.Code)
+	}
+
+	// Verify parent is revoked
+	isRevoked, _ := server.store.IsTokenRevoked(ctx, parentJTI)
+	if !isRevoked {
+		t.Error("Parent token should be revoked")
+	}
+
+	// Verify child is also revoked (cascade)
+	isRevoked, _ = server.store.IsTokenRevoked(ctx, childJTI)
+	if !isRevoked {
+		t.Error("Child token should be revoked via cascade")
+	}
+}
+
+func TestAuthorize_ChildWithRevokedParent(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+
+	// Create parent token
+	parentToken, parentJTI, err := server.jwtService.CreateToken("alice", "testnet", 100, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to create parent token: %v", err)
+	}
+	_ = parentToken
+
+	// Create child token linked to parent
+	childToken, _, err := server.jwtService.CreateChildToken("alice", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
+
+	// Authorize child token before revoking parent — should succeed
+	req := httptest.NewRequest("POST", "/authorize", nil)
+	req.Header.Set("Authorization", "Bearer "+childToken)
+	w := httptest.NewRecorder()
+	server.Authorize(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 before parent revocation, got %d", w.Code)
+	}
+
+	// Revoke parent
+	err = server.store.RevokeToken(ctx, parentJTI, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to revoke parent token: %v", err)
+	}
+
+	// Authorize child token after revoking parent — should fail
+	req2 := httptest.NewRequest("POST", "/authorize", nil)
+	req2.Header.Set("Authorization", "Bearer "+childToken)
+	w2 := httptest.NewRecorder()
+	server.Authorize(w2, req2)
+
+	if w2.Code != http.StatusForbidden {
+		t.Errorf("Expected status 403 after parent revocation, got %d", w2.Code)
+	}
+}
+
+func TestAuthorize_ChildWithValidParent(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	// Create parent token (not revoked)
+	_, parentJTI, err := server.jwtService.CreateToken("alice", "testnet", 100, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to create parent token: %v", err)
+	}
+
+	// Create child token linked to parent
+	childToken, _, err := server.jwtService.CreateChildToken("alice", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
+
+	// Authorize child token — should succeed (parent not revoked)
+	req := httptest.NewRequest("POST", "/authorize", nil)
+	req.Header.Set("Authorization", "Bearer "+childToken)
+	w := httptest.NewRecorder()
+	server.Authorize(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 for child with valid parent, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestRenewToken_SetsParentJTI(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	// Create parent token pair
+	tokenPair, err := server.jwtService.CreateTokenPair("alice", "testnet", 100,
+		auth.DefaultChildTokenExpiry, auth.DefaultParentTokenExpiry, false)
+	if err != nil {
+		t.Fatalf("Failed to create token pair: %v", err)
+	}
+
+	// Renew via API using parent token
+	reqBody := `{"parent_token":"` + tokenPair.ParentToken + `"}`
+	req := httptest.NewRequest("POST", "/renew", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.RenewToken(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// Parse response to get child token
+	var resp TokenResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Validate child token claims
+	claims, err := server.jwtService.ValidateToken(resp.Token)
+	if err != nil {
+		t.Fatalf("Failed to validate child token: %v", err)
+	}
+
+	if claims.ParentJTI != tokenPair.ParentJTI {
+		t.Errorf("Expected parent_jti %q, got %q", tokenPair.ParentJTI, claims.ParentJTI)
+	}
+
+	if claims.TokenType != auth.TokenTypeChild {
+		t.Errorf("Expected token_type %q, got %q", auth.TokenTypeChild, claims.TokenType)
+	}
+}
