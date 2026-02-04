@@ -324,6 +324,8 @@ func (s *RedisStore) GetChildTokens(ctx context.Context, parentJTI string) ([]st
 }
 
 // RevokeChildTokens revokes all child tokens tracked under a parent JTI.
+// Uses a transactional pipeline (MULTI/EXEC) to atomically revoke all children
+// and clean up the tracking set in a single round-trip to Redis.
 // Returns the number of child tokens revoked.
 func (s *RedisStore) RevokeChildTokens(ctx context.Context, parentJTI string, ttl time.Duration) (int, error) {
 	children, err := s.GetChildTokens(ctx, parentJTI)
@@ -335,16 +337,19 @@ func (s *RedisStore) RevokeChildTokens(ctx context.Context, parentJTI string, tt
 		return 0, nil
 	}
 
+	pipe := s.client.TxPipeline()
+
 	for _, childJTI := range children {
-		if err := s.RevokeToken(ctx, childJTI, ttl); err != nil {
-			return 0, fmt.Errorf("failed to revoke child token %s: %w", childJTI, err)
-		}
+		revokedKey := revokedTokenPrefix + childJTI
+		pipe.Set(ctx, revokedKey, "1", ttl)
 	}
 
 	// Clean up the tracking set
 	key := parentChildrenPrefix + parentJTI
-	if err := s.client.Del(ctx, key).Err(); err != nil {
-		return len(children), fmt.Errorf("failed to delete child token set: %w", err)
+	pipe.Del(ctx, key)
+
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("failed to cascade revoke child tokens for parent %s: %w", parentJTI, err)
 	}
 
 	return len(children), nil

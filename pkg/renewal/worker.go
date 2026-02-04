@@ -186,7 +186,7 @@ func (w *Worker) processConfig(ctx context.Context, config *storage.AutoRenewalC
 
 	// Track child→parent relationship for cascade revocation
 	if err := w.store.TrackChildToken(ctx, config.ParentJTI, newChildJTI, time.Until(config.ParentExpiry)); err != nil {
-		log.Printf("⚠️  Warning: Failed to track child token for cascade: %v", err)
+		return false, fmt.Errorf("failed to track child token for cascade: %w", err)
 	}
 
 	log.Printf("✅ Child token auto-generated: user=%s, parent_jti=%s, child_jti=%s, expires_at=%s",
