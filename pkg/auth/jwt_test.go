@@ -417,3 +417,124 @@ func TestExportKeys(t *testing.T) {
 		t.Error("Public key PEM does not start with correct header")
 	}
 }
+
+func TestCreateChildToken(t *testing.T) {
+	privateKey, _ := GenerateKeyPair()
+	privateKeyPEM := ExportPrivateKeyPEM(privateKey)
+	service, _ := NewJWTService("https://test-issuer.example.com", "test-audience", privateKeyPEM)
+
+	parentJTI := "parent-jti-abc123"
+	userID := "alice"
+	network := "testnet"
+	rateLimit := 100
+	expiry := 15 * time.Minute
+
+	token, tokenID, err := service.CreateChildToken(userID, network, rateLimit, expiry, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
+
+	if token == "" {
+		t.Error("Token is empty")
+	}
+
+	if tokenID == "" {
+		t.Error("Token ID is empty")
+	}
+
+	// Validate and check claims
+	claims, err := service.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("Failed to validate child token: %v", err)
+	}
+
+	if claims.TokenType != TokenTypeChild {
+		t.Errorf("Expected token_type %q, got %q", TokenTypeChild, claims.TokenType)
+	}
+
+	if claims.ParentJTI != parentJTI {
+		t.Errorf("Expected parent_jti %q, got %q", parentJTI, claims.ParentJTI)
+	}
+
+	if claims.UserID != userID {
+		t.Errorf("Expected user_id %q, got %q", userID, claims.UserID)
+	}
+
+	if claims.Network != network {
+		t.Errorf("Expected network %q, got %q", network, claims.Network)
+	}
+
+	if claims.RateLimit != rateLimit {
+		t.Errorf("Expected rate_limit %d, got %d", rateLimit, claims.RateLimit)
+	}
+
+	if claims.ID != tokenID {
+		t.Errorf("Expected JTI %q, got %q", tokenID, claims.ID)
+	}
+}
+
+func TestCreateChildToken_ValidatesSignature(t *testing.T) {
+	privateKey, _ := GenerateKeyPair()
+	privateKeyPEM := ExportPrivateKeyPEM(privateKey)
+	service, _ := NewJWTService("https://test-issuer.example.com", "test-audience", privateKeyPEM)
+
+	// Create child token with one service
+	token, _, err := service.CreateChildToken("alice", "testnet", 100, 15*time.Minute, "parent-jti-123")
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
+
+	// Validate with same service should succeed
+	claims, err := service.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("Failed to validate child token: %v", err)
+	}
+
+	if claims == nil {
+		t.Fatal("Claims are nil")
+	}
+
+	// Validate with different service should fail
+	otherKey, _ := GenerateKeyPair()
+	otherPEM := ExportPrivateKeyPEM(otherKey)
+	otherService, _ := NewJWTService("https://other.example.com", "other", otherPEM)
+
+	_, err = otherService.ValidateToken(token)
+	if err == nil {
+		t.Error("Expected error validating with different key, got none")
+	}
+}
+
+func TestCreateChildToken_ParentJTIClaim(t *testing.T) {
+	privateKey, _ := GenerateKeyPair()
+	privateKeyPEM := ExportPrivateKeyPEM(privateKey)
+	service, _ := NewJWTService("https://test-issuer.example.com", "test-audience", privateKeyPEM)
+
+	parentJTIs := []string{
+		"parent-abc-123",
+		"parent-def-456",
+		"parent-ghi-789",
+	}
+
+	for _, parentJTI := range parentJTIs {
+		t.Run("parent_jti="+parentJTI, func(t *testing.T) {
+			token, _, err := service.CreateChildToken("alice", "testnet", 100, 15*time.Minute, parentJTI)
+			if err != nil {
+				t.Fatalf("Failed to create child token: %v", err)
+			}
+
+			claims, err := service.ValidateToken(token)
+			if err != nil {
+				t.Fatalf("Failed to validate child token: %v", err)
+			}
+
+			if claims.ParentJTI != parentJTI {
+				t.Errorf("Expected parent_jti %q, got %q", parentJTI, claims.ParentJTI)
+			}
+
+			if claims.TokenType != TokenTypeChild {
+				t.Errorf("Expected token_type %q, got %q", TokenTypeChild, claims.TokenType)
+			}
+		})
+	}
+}
