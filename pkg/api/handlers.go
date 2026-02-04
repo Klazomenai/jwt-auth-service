@@ -499,7 +499,7 @@ func (s *Server) ValidateSession(w http.ResponseWriter, r *http.Request) {
 	// Step 7: Check JTI exists
 	jti := claims.ID
 	if jti == "" {
-		s.sendError(w, http.StatusUnauthorized, "JWT missing jti claim", "")
+		s.sendError(w, http.StatusBadRequest, "JWT missing jti claim", "")
 		return
 	}
 

@@ -761,7 +761,10 @@ func TestValidateSession_ValidToken(t *testing.T) {
 	defer mr.Close()
 
 	csrf := storeTestCSRF(t, server, 0x10)
-	jwt, _, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: jwt})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -776,7 +779,9 @@ func TestValidateSession_ValidToken(t *testing.T) {
 	}
 
 	var resp ValidateResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 
 	if !resp.Valid {
 		t.Error("Expected valid=true")
@@ -802,8 +807,14 @@ func TestValidateSession_ValidChildToken(t *testing.T) {
 	csrf := storeTestCSRF(t, server, 0x11)
 
 	// Create parent, then child
-	_, parentJTI, _ := server.jwtService.CreateToken("bob", "testnet", 100, auth.DefaultParentTokenExpiry)
-	childJWT, _, _ := server.jwtService.CreateChildToken("bob", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	_, parentJTI, err := server.jwtService.CreateToken("bob", "testnet", 100, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to create parent token: %v", err)
+	}
+	childJWT, _, err := server.jwtService.CreateChildToken("bob", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: childJWT})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -818,7 +829,9 @@ func TestValidateSession_ValidChildToken(t *testing.T) {
 	}
 
 	var resp ValidateResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
 
 	if resp.TokenType != auth.TokenTypeChild {
 		t.Errorf("Expected token_type %q, got %q", auth.TokenTypeChild, resp.TokenType)
@@ -829,7 +842,10 @@ func TestValidateSession_MissingCSRFToken(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()
 
-	jwt, _, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: jwt})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -848,7 +864,10 @@ func TestValidateSession_InvalidCSRFTokenFormat(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()
 
-	jwt, _, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: jwt})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -870,12 +889,17 @@ func TestValidateSession_ExpiredCSRFToken(t *testing.T) {
 	// Store CSRF with short TTL
 	csrf := generateTestToken(0x12)
 	ctx := context.Background()
-	server.store.StoreCSRFToken(ctx, csrf, 100*time.Millisecond)
+	if err := server.store.StoreCSRFToken(ctx, csrf, 100*time.Millisecond); err != nil {
+		t.Fatalf("Failed to store CSRF token: %v", err)
+	}
 
 	// Fast-forward miniredis past expiry
 	mr.FastForward(200 * time.Millisecond)
 
-	jwt, _, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: jwt})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -914,11 +938,16 @@ func TestValidateSession_RevokedToken(t *testing.T) {
 	defer mr.Close()
 
 	csrf := storeTestCSRF(t, server, 0x14)
-	jwt, jti, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, jti, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	// Revoke the token
 	ctx := context.Background()
-	server.store.RevokeToken(ctx, jti, 1*time.Hour)
+	if err := server.store.RevokeToken(ctx, jti, 1*time.Hour); err != nil {
+		t.Fatalf("Failed to revoke token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: jwt})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -941,11 +970,19 @@ func TestValidateSession_ChildWithRevokedParent(t *testing.T) {
 	ctx := context.Background()
 
 	// Create parent and child
-	_, parentJTI, _ := server.jwtService.CreateToken("alice", "testnet", 100, auth.DefaultParentTokenExpiry)
-	childJWT, _, _ := server.jwtService.CreateChildToken("alice", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	_, parentJTI, err := server.jwtService.CreateToken("alice", "testnet", 100, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to create parent token: %v", err)
+	}
+	childJWT, _, err := server.jwtService.CreateChildToken("alice", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
 
 	// Revoke the parent
-	server.store.RevokeToken(ctx, parentJTI, auth.DefaultParentTokenExpiry)
+	if err := server.store.RevokeToken(ctx, parentJTI, auth.DefaultParentTokenExpiry); err != nil {
+		t.Fatalf("Failed to revoke parent token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: childJWT})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -1003,7 +1040,10 @@ func TestValidateSession_CookieAttributes(t *testing.T) {
 	defer mr.Close()
 
 	csrf := storeTestCSRF(t, server, 0x18)
-	jwt, _, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: jwt})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -1056,7 +1096,10 @@ func TestValidateSession_MaxAgeMatchesJWTExpiry(t *testing.T) {
 	defer mr.Close()
 
 	csrf := storeTestCSRF(t, server, 0x19)
-	jwt, _, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	body, _ := json.Marshal(ValidateRequest{Token: jwt})
 	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
@@ -1099,7 +1142,10 @@ func TestValidateSession_RedisFailure(t *testing.T) {
 
 	// Store CSRF token while Redis is up
 	csrf := storeTestCSRF(t, server, 0x1A)
-	jwt, _, _ := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
 
 	// Close Redis to simulate failure
 	mr.Close()
