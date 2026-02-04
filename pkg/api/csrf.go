@@ -69,6 +69,22 @@ func (s *Server) GenerateCSRFToken(w http.ResponseWriter, r *http.Request) {
 	s.sendJSON(w, http.StatusOK, resp)
 }
 
+// validateCSRFTokenFormat checks the format of a CSRF token without checking Redis.
+// Returns nil if format is valid, or an error describing the format violation.
+func validateCSRFTokenFormat(token string) error {
+	if token == "" {
+		return fmt.Errorf("token is empty")
+	}
+	if len(token) > 100 || strings.ContainsAny(token, "\n\r\t ") {
+		return fmt.Errorf("invalid token format")
+	}
+	decodedToken, err := base64.URLEncoding.DecodeString(token)
+	if err != nil || len(decodedToken) != csrfTokenLength {
+		return fmt.Errorf("invalid token format")
+	}
+	return nil
+}
+
 // ValidateCSRFToken handles CSRF token validation requests (POST /validate-csrf)
 // Validates token existence in Redis and consumes it (one-time use)
 func (s *Server) ValidateCSRFToken(w http.ResponseWriter, r *http.Request) {
@@ -89,22 +105,11 @@ func (s *Server) ValidateCSRFToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate token format: must be base64-encoded and decode to csrfTokenLength bytes
-	// Expected length: base64-encoded 32 bytes = 44 characters (with padding)
-	if len(req.Token) > 100 || strings.ContainsAny(req.Token, "\n\r\t ") {
+	// Validate token format
+	if err := validateCSRFTokenFormat(req.Token); err != nil {
 		resp := CSRFValidateResponse{
 			Valid:   false,
-			Message: "invalid token format",
-		}
-		s.sendJSON(w, http.StatusBadRequest, resp)
-		return
-	}
-
-	decodedToken, err := base64.URLEncoding.DecodeString(req.Token)
-	if err != nil || len(decodedToken) != csrfTokenLength {
-		resp := CSRFValidateResponse{
-			Valid:   false,
-			Message: "invalid token format",
+			Message: err.Error(),
 		}
 		s.sendJSON(w, http.StatusBadRequest, resp)
 		return
