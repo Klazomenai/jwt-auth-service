@@ -742,3 +742,424 @@ func TestRenewToken_SetsParentJTI(t *testing.T) {
 		t.Errorf("Expected token_type %q, got %q", auth.TokenTypeChild, claims.TokenType)
 	}
 }
+
+// --- ValidateSession tests ---
+
+// helper: create a valid CSRF token stored in Redis and return it
+func storeTestCSRF(t *testing.T, server *Server, pattern byte) string {
+	t.Helper()
+	token := generateTestToken(pattern)
+	ctx := context.Background()
+	if err := server.store.StoreCSRFToken(ctx, token, csrfTokenTTL); err != nil {
+		t.Fatalf("Failed to store CSRF token: %v", err)
+	}
+	return token
+}
+
+func TestValidateSession_ValidToken(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x10)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp ValidateResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if !resp.Valid {
+		t.Error("Expected valid=true")
+	}
+	if resp.UserID != "alice" {
+		t.Errorf("Expected user_id 'alice', got %q", resp.UserID)
+	}
+	if resp.ExpiresAt.IsZero() {
+		t.Error("Expected non-zero expires_at")
+	}
+
+	// Verify Set-Cookie header present
+	cookies := w.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("Expected Set-Cookie header")
+	}
+}
+
+func TestValidateSession_ValidChildToken(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x11)
+
+	// Create parent, then child
+	_, parentJTI, err := server.jwtService.CreateToken("bob", "testnet", 100, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to create parent token: %v", err)
+	}
+	childJWT, _, err := server.jwtService.CreateChildToken("bob", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: childJWT})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	var resp ValidateResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.TokenType != auth.TokenTypeChild {
+		t.Errorf("Expected token_type %q, got %q", auth.TokenTypeChild, resp.TokenType)
+	}
+}
+
+func TestValidateSession_MissingCSRFToken(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	// No X-CSRF-Token header
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected status 403, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_InvalidCSRFTokenFormat(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", "not-valid-base64!@#$")
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected status 403, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_ExpiredCSRFToken(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	// Store CSRF with short TTL
+	csrf := generateTestToken(0x12)
+	ctx := context.Background()
+	if err := server.store.StoreCSRFToken(ctx, csrf, 100*time.Millisecond); err != nil {
+		t.Fatalf("Failed to store CSRF token: %v", err)
+	}
+
+	// Fast-forward miniredis past expiry
+	mr.FastForward(200 * time.Millisecond)
+
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected status 403, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_InvalidJWT(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x13)
+
+	body, _ := json.Marshal(ValidateRequest{Token: "garbage.jwt.token"})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected status 401, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_RevokedToken(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x14)
+	jwt, jti, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	// Revoke the token
+	ctx := context.Background()
+	if err := server.store.RevokeToken(ctx, jti, 1*time.Hour); err != nil {
+		t.Fatalf("Failed to revoke token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected status 403, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_ChildWithRevokedParent(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x15)
+	ctx := context.Background()
+
+	// Create parent and child
+	_, parentJTI, err := server.jwtService.CreateToken("alice", "testnet", 100, auth.DefaultParentTokenExpiry)
+	if err != nil {
+		t.Fatalf("Failed to create parent token: %v", err)
+	}
+	childJWT, _, err := server.jwtService.CreateChildToken("alice", "testnet", 100, auth.DefaultChildTokenExpiry, parentJTI)
+	if err != nil {
+		t.Fatalf("Failed to create child token: %v", err)
+	}
+
+	// Revoke the parent
+	if err := server.store.RevokeToken(ctx, parentJTI, auth.DefaultParentTokenExpiry); err != nil {
+		t.Fatalf("Failed to revoke parent token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: childJWT})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("Expected status 403, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_MissingBody(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x16)
+
+	// Send empty body
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader([]byte{}))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_EmptyToken(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x17)
+
+	body, _ := json.Marshal(ValidateRequest{Token: ""})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestValidateSession_CookieAttributes(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x18)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	cookies := w.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("Expected Set-Cookie header")
+	}
+
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == sessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+
+	if sessionCookie == nil {
+		t.Fatalf("Expected cookie named %q", sessionCookieName)
+	}
+
+	if !sessionCookie.HttpOnly {
+		t.Error("Expected HttpOnly=true")
+	}
+	if !sessionCookie.Secure {
+		t.Error("Expected Secure=true")
+	}
+	if sessionCookie.SameSite != http.SameSiteStrictMode {
+		t.Errorf("Expected SameSite=Strict, got %v", sessionCookie.SameSite)
+	}
+	if sessionCookie.Path != sessionCookiePath {
+		t.Errorf("Expected Path=%q, got %q", sessionCookiePath, sessionCookie.Path)
+	}
+	if sessionCookie.Value != jwt {
+		t.Error("Expected cookie value to be the JWT token")
+	}
+}
+
+func TestValidateSession_MaxAgeMatchesJWTExpiry(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	csrf := storeTestCSRF(t, server, 0x19)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	cookies := w.Result().Cookies()
+	var sessionCookie *http.Cookie
+	for _, c := range cookies {
+		if c.Name == sessionCookieName {
+			sessionCookie = c
+			break
+		}
+	}
+
+	if sessionCookie == nil {
+		t.Fatal("Expected session cookie")
+	}
+
+	// MaxAge should be approximately 3600 seconds (1 hour), allow ±5s tolerance
+	expectedMaxAge := 3600
+	diff := sessionCookie.MaxAge - expectedMaxAge
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 5 {
+		t.Errorf("Expected MaxAge ~%d, got %d (diff: %d)", expectedMaxAge, sessionCookie.MaxAge, diff)
+	}
+}
+
+func TestValidateSession_RedisFailure(t *testing.T) {
+	server, mr := setupTestServer(t)
+
+	// Store CSRF token while Redis is up
+	csrf := storeTestCSRF(t, server, 0x1A)
+	jwt, _, err := server.jwtService.CreateToken("alice", "testnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create JWT token: %v", err)
+	}
+
+	// Close Redis to simulate failure
+	mr.Close()
+
+	body, _ := json.Marshal(ValidateRequest{Token: jwt})
+	req := httptest.NewRequest("POST", "/api/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", csrf)
+	w := httptest.NewRecorder()
+
+	server.ValidateSession(w, req)
+
+	// Should return 500 (fail-closed)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 for Redis failure, got %d", w.Code)
+	}
+}

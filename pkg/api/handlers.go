@@ -44,6 +44,24 @@ type ErrorResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
+// ValidateRequest represents a session validation request
+type ValidateRequest struct {
+	Token string `json:"token"`
+}
+
+// ValidateResponse represents a session validation response
+type ValidateResponse struct {
+	Valid     bool      `json:"valid"`
+	UserID    string    `json:"user_id,omitempty"`
+	TokenType string    `json:"token_type,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+}
+
+const (
+	sessionCookieName = "session_token"
+	sessionCookiePath = "/"
+)
+
 // NewServer creates a new API server
 func NewServer(jwtService *auth.JWTService, store *storage.RedisStore) *Server {
 	s := &Server{
@@ -64,6 +82,7 @@ func NewServer(jwtService *auth.JWTService, store *storage.RedisStore) *Server {
 	s.router.HandleFunc("/authorize", s.Authorize).Methods("POST", "GET", "HEAD")
 	s.router.HandleFunc("/csrf", s.GenerateCSRFToken).Methods("GET")
 	s.router.HandleFunc("/validate-csrf", s.ValidateCSRFToken).Methods("POST")
+	s.router.HandleFunc("/api/validate", s.ValidateSession).Methods("POST")
 	s.router.HandleFunc("/.well-known/jwks.json", s.GetJWKS).Methods("GET")
 	s.router.HandleFunc("/health", s.Health).Methods("GET")
 	s.router.HandleFunc("/healthz", s.Health).Methods("GET")
@@ -425,6 +444,119 @@ func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
 
 	// Token is valid and not revoked - allow request
 	w.WriteHeader(http.StatusOK)
+}
+
+// ValidateSession handles JWT validation and sets HttpOnly session cookies (POST /api/validate)
+// Requires X-CSRF-Token header for CSRF protection. Fail-closed on Redis errors.
+func (s *Server) ValidateSession(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Extract CSRF token from header
+	csrfToken := r.Header.Get("X-CSRF-Token")
+	if csrfToken == "" {
+		s.sendError(w, http.StatusForbidden, "Missing CSRF token", "X-CSRF-Token header is required")
+		return
+	}
+
+	// Step 2: Validate CSRF token format
+	if err := validateCSRFTokenFormat(csrfToken); err != nil {
+		s.sendError(w, http.StatusForbidden, "Invalid CSRF token format", err.Error())
+		return
+	}
+
+	// Step 3: Consume CSRF token (one-time use, consumed before JWT parsing)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	csrfValid, err := s.store.ValidateAndConsumeCSRFToken(ctx, csrfToken)
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, "Failed to validate CSRF token", err.Error())
+		return
+	}
+	if !csrfValid {
+		s.sendError(w, http.StatusForbidden, "CSRF token invalid, expired, or already used", "")
+		return
+	}
+
+	// Step 4: Parse request body
+	var req ValidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.sendError(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+
+	// Step 5: Validate token field
+	if req.Token == "" {
+		s.sendError(w, http.StatusBadRequest, "token field is required", "")
+		return
+	}
+
+	// Step 6: Validate JWT
+	claims, err := s.jwtService.ValidateToken(req.Token)
+	if err != nil {
+		s.sendError(w, http.StatusUnauthorized, "Invalid JWT token", err.Error())
+		return
+	}
+
+	// Step 7: Check JTI exists
+	jti := claims.ID
+	if jti == "" {
+		s.sendError(w, http.StatusBadRequest, "JWT missing jti claim", "")
+		return
+	}
+
+	// Step 8: Check if token is revoked (fail-closed on Redis errors)
+	isRevoked, err := s.store.IsTokenRevoked(ctx, jti)
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, "Failed to check token revocation status", err.Error())
+		return
+	}
+	if isRevoked {
+		s.sendError(w, http.StatusForbidden, "Token has been revoked", "")
+		return
+	}
+
+	// Step 9: If child token, check parent revocation (fail-closed on Redis errors)
+	if claims.ParentJTI != "" {
+		parentRevoked, err := s.store.IsTokenRevoked(ctx, claims.ParentJTI)
+		if err != nil {
+			s.sendError(w, http.StatusInternalServerError, "Failed to check parent token revocation status", err.Error())
+			return
+		}
+		if parentRevoked {
+			s.sendError(w, http.StatusForbidden, "Parent token has been revoked", "")
+			return
+		}
+	}
+
+	// Step 10: Compute cookie MaxAge from JWT expiry
+	maxAge := int(time.Until(claims.ExpiresAt.Time).Seconds())
+	if maxAge <= 0 {
+		s.sendError(w, http.StatusUnauthorized, "Token has expired", "")
+		return
+	}
+
+	// Step 11: Set HttpOnly session cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    req.Token,
+		Path:     sessionCookiePath,
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	// Step 12: Return success response
+	fmt.Printf("Session validated: user=%s, token_type=%s, jti=%s, max_age=%ds\n",
+		claims.UserID, claims.TokenType, jti, maxAge)
+
+	resp := ValidateResponse{
+		Valid:     true,
+		UserID:    claims.UserID,
+		TokenType: claims.TokenType,
+		ExpiresAt: claims.ExpiresAt.Time,
+	}
+
+	s.sendJSON(w, http.StatusOK, resp)
 }
 
 // GetJWKS returns the JSON Web Key Set
