@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.3-alpha.0...v0.1.4-alpha.0) (2026-02-05)
+
+
+### Added
+
+* **web:** add embedded terminal landing page with xterm.js ([#32](https://github.com/Klazomenai/jwt-auth-service/issues/32)) ([aa8beea](https://github.com/Klazomenai/jwt-auth-service/commit/aa8beeaceca560b4734f28a0fa3a8910e8b10040))
+
 ## [0.1.3-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.2-alpha.0...v0.1.3-alpha.0) (2026-02-05)
 
 
