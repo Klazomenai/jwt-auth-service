@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.2-alpha.0...v0.1.3-alpha.0) (2026-02-05)
+
+
+### Added
+
+* **api:** add /api/validate endpoint with httponly session cookies ([#29](https://github.com/Klazomenai/jwt-auth-service/issues/29)) ([ed55ae4](https://github.com/Klazomenai/jwt-auth-service/commit/ed55ae4a678534eb6cc5deaa821fa2db6a8e8228))
+
 ## [0.1.2-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.1-alpha.0...v0.1.2-alpha.0) (2026-02-03)
 
 
