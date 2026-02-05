@@ -614,7 +614,11 @@ func (s *Server) serveLandingPage(w http.ResponseWriter, r *http.Request) {
 			"script-src 'self' https://cdn.jsdelivr.net; "+
 			"style-src 'self' https://cdn.jsdelivr.net; "+
 			"connect-src 'self'; "+
-			"font-src 'self'")
+			"font-src 'self'; "+
+			"object-src 'none'; "+
+			"base-uri 'self'; "+
+			"form-action 'self'; "+
+			"frame-ancestors 'none'")
 	w.Write(indexContent)
 }
 
