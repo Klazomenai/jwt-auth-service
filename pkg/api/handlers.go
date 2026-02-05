@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/klazomenai/jwt-auth-service/pkg/auth"
 	"github.com/klazomenai/jwt-auth-service/pkg/metrics"
 	"github.com/klazomenai/jwt-auth-service/pkg/storage"
+	"github.com/klazomenai/jwt-auth-service/web"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -87,6 +89,16 @@ func NewServer(jwtService *auth.JWTService, store *storage.RedisStore) *Server {
 	s.router.HandleFunc("/health", s.Health).Methods("GET")
 	s.router.HandleFunc("/healthz", s.Health).Methods("GET")
 	s.router.Handle("/metrics", s.metricsHandler()).Methods("GET")
+
+	// Terminal landing page (embedded static files)
+	staticFS, err := fs.Sub(web.StaticFiles, "static")
+	if err != nil {
+		panic("failed to create static sub-filesystem: " + err.Error())
+	}
+	s.router.PathPrefix("/static/").Handler(
+		http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))),
+	)
+	s.router.HandleFunc("/", s.serveLandingPage).Methods("GET")
 
 	return s
 }
@@ -586,6 +598,24 @@ func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
 		"redis":  "connected",
 	}
 	s.sendJSON(w, http.StatusOK, resp)
+}
+
+// serveLandingPage serves the terminal authentication UI (GET /)
+func (s *Server) serveLandingPage(w http.ResponseWriter, r *http.Request) {
+	indexContent, err := web.StaticFiles.ReadFile("static/index.html")
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, "Failed to load landing page", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'self'; "+
+			"script-src 'self' https://cdn.jsdelivr.net; "+
+			"style-src 'self' https://cdn.jsdelivr.net; "+
+			"connect-src 'self'; "+
+			"font-src 'self'")
+	w.Write(indexContent)
 }
 
 // GetLatestToken handles polling requests for latest auto-renewed child token

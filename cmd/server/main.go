@@ -88,6 +88,8 @@ func main() {
 	log.Printf("  GET    /.well-known/jwks.json - JWK Set")
 	log.Printf("  GET    /health - Health check")
 	log.Printf("  GET    /metrics - Prometheus metrics")
+	log.Printf("  GET    / - Terminal authentication UI")
+	log.Printf("  GET    /static/* - Static assets (embedded)")
 
 	srv := &http.Server{
 		Addr:         addr,
