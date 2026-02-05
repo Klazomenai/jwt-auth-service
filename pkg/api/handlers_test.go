@@ -1163,3 +1163,118 @@ func TestValidateSession_RedisFailure(t *testing.T) {
 		t.Errorf("Expected status 500 for Redis failure, got %d", w.Code)
 	}
 }
+
+func TestLandingPage_IndexHTML(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if !strings.Contains(contentType, "text/html") {
+		t.Errorf("Expected Content-Type text/html, got %s", contentType)
+	}
+
+	csp := w.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Error("Expected Content-Security-Policy header to be set")
+	}
+	if !strings.Contains(csp, "cdn.jsdelivr.net") {
+		t.Errorf("Expected CSP to allow cdn.jsdelivr.net, got %s", csp)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "xterm") {
+		t.Error("Expected index.html to reference xterm")
+	}
+	if !strings.Contains(body, "terminal") {
+		t.Error("Expected index.html to contain terminal element")
+	}
+}
+
+func TestLandingPage_AuthJS(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	req := httptest.NewRequest("GET", "/static/auth.js", nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if !strings.Contains(contentType, "javascript") {
+		t.Errorf("Expected Content-Type containing javascript, got %s", contentType)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Terminal") {
+		t.Error("Expected auth.js to contain Terminal initialization")
+	}
+}
+
+func TestLandingPage_StyleCSS(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	req := httptest.NewRequest("GET", "/static/style.css", nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if !strings.Contains(contentType, "text/css") {
+		t.Errorf("Expected Content-Type text/css, got %s", contentType)
+	}
+}
+
+func TestLandingPage_NotFound(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	req := httptest.NewRequest("GET", "/static/nonexistent.js", nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+func TestLandingPage_ExistingRoutesUnaffected(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	// Verify /health still works
+	req := httptest.NewRequest("GET", "/health", nil)
+	w := httptest.NewRecorder()
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected /health status 200, got %d", w.Code)
+	}
+
+	// Verify /csrf still works
+	req2 := httptest.NewRequest("GET", "/csrf", nil)
+	w2 := httptest.NewRecorder()
+	server.Router().ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Errorf("Expected /csrf status 200, got %d", w2.Code)
+	}
+}
