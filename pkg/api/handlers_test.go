@@ -750,7 +750,7 @@ func storeTestCSRF(t *testing.T, server *Server, pattern byte) string {
 	t.Helper()
 	token := generateTestToken(pattern)
 	ctx := context.Background()
-	if err := server.store.StoreCSRFToken(ctx, token, 5*time.Minute); err != nil {
+	if err := server.store.StoreCSRFToken(ctx, token, csrfTokenTTL); err != nil {
 		t.Fatalf("Failed to store CSRF token: %v", err)
 	}
 	return token
