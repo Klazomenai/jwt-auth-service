@@ -16,15 +16,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o jwt-server ./cmd/
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates && \
+    mkdir -p /etc/jwt-service && \
+    chown nobody:nobody /etc/jwt-service && \
+    chmod 0700 /etc/jwt-service
 
-WORKDIR /root/
+WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/jwt-server .
 
-# Create directory for keys
-RUN mkdir -p /etc/jwt-service
+# Run as non-root
+USER 65534
 
 # Expose port
 EXPOSE 8080
