@@ -22,9 +22,6 @@ jobs:
       - name: Download dependencies
         run: make deps
 
-      - name: Run tests
-        run: make test
-
       - name: Run tests with coverage
         run: make test-verbose
 
