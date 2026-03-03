@@ -46,12 +46,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
-        run: make docker-push IMAGE_TAG=${{ needs.release-please.outputs.tag_name }}
+        run: make docker-push IMAGE_TAG=${{ needs.release-please.outputs.version }}
 
       - name: Tag and push latest
-        if: ${{ !contains(needs.release-please.outputs.tag_name, 'alpha') && !contains(needs.release-please.outputs.tag_name, 'beta') }}
+        if: ${{ !contains(needs.release-please.outputs.version, 'alpha') && !contains(needs.release-please.outputs.version, 'beta') }}
         env:
-          IMAGE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          IMAGE_TAG: ${{ needs.release-please.outputs.version }}
         run: |
           docker tag ghcr.io/${{ github.repository }}:$IMAGE_TAG ghcr.io/${{ github.repository }}:latest
           docker push ghcr.io/${{ github.repository }}:latest
@@ -65,5 +65,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Pull with:" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ghcr.io/klazomenai/jwt-auth-service:${{ needs.release-please.outputs.tag_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/${{ github.repository }}:${{ needs.release-please.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
