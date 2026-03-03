@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.3-alpha.0...v0.1.4-alpha.0) (2026-03-03)
+
+
+### Added
+
+* **web:** add embedded terminal landing page with xterm.js ([#32](https://github.com/Klazomenai/jwt-auth-service/issues/32)) ([aa8beea](https://github.com/Klazomenai/jwt-auth-service/commit/aa8beeaceca560b4734f28a0fa3a8910e8b10040))
+
+
+### Fixed
+
+* **ci:** remove redundant test step in ci workflow ([#47](https://github.com/Klazomenai/jwt-auth-service/issues/47)) ([4aefbbe](https://github.com/Klazomenai/jwt-auth-service/commit/4aefbbea663808b6fa169e1f69867585e249cb36)), closes [#5](https://github.com/Klazomenai/jwt-auth-service/issues/5)
+* **ci:** use bare version for docker image tags ([#48](https://github.com/Klazomenai/jwt-auth-service/issues/48)) ([6b72105](https://github.com/Klazomenai/jwt-auth-service/commit/6b72105fd08e58d14b323d1212689a336dbc5d2d)), closes [#44](https://github.com/Klazomenai/jwt-auth-service/issues/44)
+* **docker:** run as non-root user with /app workdir ([#46](https://github.com/Klazomenai/jwt-auth-service/issues/46)) ([e4c3e4b](https://github.com/Klazomenai/jwt-auth-service/commit/e4c3e4b846b0c5a048b686f9e6617c42bd8a0e5b)), closes [#45](https://github.com/Klazomenai/jwt-auth-service/issues/45)
+* **metrics:** implement revoked tokens total metric using redis scan ([#49](https://github.com/Klazomenai/jwt-auth-service/issues/49)) ([a2bf496](https://github.com/Klazomenai/jwt-auth-service/commit/a2bf4964bb565856f9705d3cb96c56ab925996a0)), closes [#16](https://github.com/Klazomenai/jwt-auth-service/issues/16)
+
 ## [0.1.3-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.2-alpha.0...v0.1.3-alpha.0) (2026-02-05)
 
 
