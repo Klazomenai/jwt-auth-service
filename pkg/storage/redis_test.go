@@ -158,23 +158,23 @@ func TestIsTokenRevoked(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		tokenID        string
+		name            string
+		tokenID         string
 		expectedRevoked bool
 	}{
 		{
-			name:           "revoked token",
-			tokenID:        revokedTokenID,
+			name:            "revoked token",
+			tokenID:         revokedTokenID,
 			expectedRevoked: true,
 		},
 		{
-			name:           "non-revoked token",
-			tokenID:        "active-token",
+			name:            "non-revoked token",
+			tokenID:         "active-token",
 			expectedRevoked: false,
 		},
 		{
-			name:           "non-existent token",
-			tokenID:        "non-existent",
+			name:            "non-existent token",
+			tokenID:         "non-existent",
 			expectedRevoked: false,
 		},
 	}
@@ -775,6 +775,92 @@ func TestRevokeChildTokens(t *testing.T) {
 	}
 	if exists != 0 {
 		t.Error("Child tracking set should be deleted after cascade revocation")
+	}
+}
+
+func TestGetRevokedTokenCount(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Empty state should return 0
+	count, err := store.GetRevokedTokenCount(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get revoked token count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 revoked tokens, got %d", count)
+	}
+
+	// Revoke 3 tokens
+	tokens := []string{"token-a", "token-b", "token-c"}
+	for _, tokenID := range tokens {
+		if err := store.RevokeToken(ctx, tokenID, 1*time.Hour); err != nil {
+			t.Fatalf("Failed to revoke token: %v", err)
+		}
+	}
+
+	// Count should be 3
+	count, err = store.GetRevokedTokenCount(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get revoked token count: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("Expected 3 revoked tokens, got %d", count)
+	}
+}
+
+func TestGetRevokedTokenCount_AfterExpiry(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer mr.Close()
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Revoke 2 tokens with different TTLs
+	if err := store.RevokeToken(ctx, "short-lived", 2*time.Second); err != nil {
+		t.Fatalf("Failed to revoke token: %v", err)
+	}
+	if err := store.RevokeToken(ctx, "long-lived", 1*time.Hour); err != nil {
+		t.Fatalf("Failed to revoke token: %v", err)
+	}
+
+	// Both should be counted
+	count, err := store.GetRevokedTokenCount(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get revoked token count: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("Expected 2 revoked tokens, got %d", count)
+	}
+
+	// Fast-forward past the short TTL
+	mr.FastForward(3 * time.Second)
+
+	// Only the long-lived token should remain
+	count, err = store.GetRevokedTokenCount(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get revoked token count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected 1 revoked token after expiry, got %d", count)
+	}
+}
+
+func TestGetRevokedTokenCount_Error(t *testing.T) {
+	store, mr := setupTestRedis(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Close miniredis to force SCAN error
+	mr.Close()
+
+	_, err := store.GetRevokedTokenCount(ctx)
+	if err == nil {
+		t.Fatal("Expected error when Redis is down, got nil")
 	}
 }
 

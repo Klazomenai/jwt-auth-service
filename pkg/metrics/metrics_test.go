@@ -31,6 +31,11 @@ func setupTestMetrics(t *testing.T) (*Collector, *storage.RedisStore, *miniredis
 
 	collector := NewCollector(store)
 
+	t.Cleanup(func() {
+		store.Close()
+		mr.Close()
+	})
+
 	return collector, store, mr
 }
 
@@ -53,8 +58,7 @@ func getGaugeVecValue(gv *prometheus.GaugeVec, labels prometheus.Labels) float64
 }
 
 func TestNewCollector(t *testing.T) {
-	collector, _, mr := setupTestMetrics(t)
-	defer mr.Close()
+	collector, _, _ := setupTestMetrics(t)
 
 	if collector == nil {
 		t.Fatal("Expected collector to be created")
@@ -66,8 +70,7 @@ func TestNewCollector(t *testing.T) {
 }
 
 func TestUpdateMetrics_NoConfigs(t *testing.T) {
-	collector, _, mr := setupTestMetrics(t)
-	defer mr.Close()
+	collector, _, _ := setupTestMetrics(t)
 
 	// Update metrics with no configurations
 	collector.UpdateMetrics()
@@ -80,8 +83,7 @@ func TestUpdateMetrics_NoConfigs(t *testing.T) {
 }
 
 func TestUpdateMetrics_WithConfigs(t *testing.T) {
-	collector, store, mr := setupTestMetrics(t)
-	defer mr.Close()
+	collector, store, _ := setupTestMetrics(t)
 
 	// Create test auto-renewal config
 	config := &storage.AutoRenewalConfig{
@@ -139,8 +141,7 @@ func TestUpdateMetrics_WithConfigs(t *testing.T) {
 }
 
 func TestUpdateMetrics_MultipleConfigs(t *testing.T) {
-	collector, store, mr := setupTestMetrics(t)
-	defer mr.Close()
+	collector, store, _ := setupTestMetrics(t)
 
 	ctx := t.Context()
 
@@ -192,8 +193,7 @@ func TestUpdateMetrics_MultipleConfigs(t *testing.T) {
 }
 
 func TestUpdateMetrics_ResetsStaleMetrics(t *testing.T) {
-	collector, store, mr := setupTestMetrics(t)
-	defer mr.Close()
+	collector, store, _ := setupTestMetrics(t)
 
 	ctx := t.Context()
 
@@ -264,6 +264,70 @@ func TestUpdateMetrics_ResetsStaleMetrics(t *testing.T) {
 	value2 := getGaugeVecValue(ParentTokenExpiryTimestamp, labels2)
 	if value2 == 0 {
 		t.Error("Expected new config to be tracked")
+	}
+}
+
+func TestUpdateMetrics_RevokedTokens(t *testing.T) {
+	collector, store, _ := setupTestMetrics(t)
+
+	ctx := t.Context()
+
+	// Before revocation, metric should be 0
+	collector.UpdateMetrics()
+	value := getGaugeValue(RevokedTokensTotal)
+	if value != 0 {
+		t.Errorf("Expected 0 revoked tokens, got %v", value)
+	}
+
+	// Revoke a token
+	if err := store.RevokeToken(ctx, "revoked-jti-1", 1*time.Hour); err != nil {
+		t.Fatalf("Failed to revoke token: %v", err)
+	}
+
+	// After revocation, metric should be 1
+	collector.UpdateMetrics()
+	value = getGaugeValue(RevokedTokensTotal)
+	if value != 1 {
+		t.Errorf("Expected 1 revoked token, got %v", value)
+	}
+}
+
+func TestUpdateMetrics_RevokedTokensMultiple(t *testing.T) {
+	collector, store, _ := setupTestMetrics(t)
+
+	ctx := t.Context()
+
+	// Revoke 3 tokens
+	tokens := []string{"jti-a", "jti-b", "jti-c"}
+	for _, jti := range tokens {
+		if err := store.RevokeToken(ctx, jti, 1*time.Hour); err != nil {
+			t.Fatalf("Failed to revoke token %s: %v", jti, err)
+		}
+	}
+
+	// Metric should reflect all 3
+	collector.UpdateMetrics()
+	value := getGaugeValue(RevokedTokensTotal)
+	if value != 3 {
+		t.Errorf("Expected 3 revoked tokens, got %v", value)
+	}
+}
+
+func TestUpdateMetrics_RedisDown(t *testing.T) {
+	collector, _, mr := setupTestMetrics(t)
+
+	// Set a known non-zero value to verify it gets reset
+	RevokedTokensTotal.Set(99)
+
+	// Close miniredis to simulate Redis failure
+	mr.Close()
+
+	// UpdateMetrics should not panic, and should set revoked total to 0
+	collector.UpdateMetrics()
+
+	value := getGaugeValue(RevokedTokensTotal)
+	if value != 0 {
+		t.Errorf("Expected RevokedTokensTotal to be 0 when Redis is down, got %v", value)
 	}
 }
 
