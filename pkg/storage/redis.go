@@ -38,8 +38,8 @@ type AutoRenewalConfig struct {
 	UserID       string    `json:"user_id"`
 	Network      string    `json:"network"`
 	RateLimit    int       `json:"rate_limit"`
-	ChildExpiry  int64     `json:"child_expiry"`   // Duration in seconds
-	ParentExpiry time.Time `json:"parent_expiry"`  // Absolute expiry time
+	ChildExpiry  int64     `json:"child_expiry"`  // Duration in seconds
+	ParentExpiry time.Time `json:"parent_expiry"` // Absolute expiry time
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -353,6 +353,27 @@ func (s *RedisStore) RevokeChildTokens(ctx context.Context, parentJTI string, tt
 	}
 
 	return len(children), nil
+}
+
+// GetRevokedTokenCount returns the count of revoked tokens using SCAN.
+// This is O(N) but acceptable for alpha workloads (<1000 revocations).
+func (s *RedisStore) GetRevokedTokenCount(ctx context.Context) (int64, error) {
+	var count int64
+	var cursor uint64
+	pattern := revokedTokenPrefix + "*"
+
+	for {
+		keys, nextCursor, err := s.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return 0, fmt.Errorf("failed to scan revoked tokens: %w", err)
+		}
+		count += int64(len(keys))
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return count, nil
 }
 
 // Close closes the Redis connection

@@ -107,4 +107,13 @@ func (c *Collector) UpdateMetrics() {
 
 	// Update total active tokens
 	ParentTokensActiveTotal.Set(float64(len(configs)))
+
+	// Update revoked token count via Redis SCAN
+	revokedCount, err := c.store.GetRevokedTokenCount(ctx)
+	if err != nil {
+		log.Printf("Warning: Failed to get revoked token count: %v", err)
+		RevokedTokensTotal.Set(0)
+	} else {
+		RevokedTokensTotal.Set(float64(revokedCount))
+	}
 }
