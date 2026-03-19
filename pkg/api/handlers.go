@@ -180,11 +180,11 @@ func (s *Server) CreateTokenPair(w http.ResponseWriter, r *http.Request) {
 	// Use default token expiries from auth package
 	childExpiry := auth.DefaultChildTokenExpiry // 15 minutes
 	parentExpiry := auth.DefaultParentTokenExpiry // 30 days
+	if req.ParentExpiryHours < 0 || req.ParentExpiryHours > 720 {
+		s.sendError(w, http.StatusBadRequest, "parent_expiry_hours must be between 0 and 720", "")
+		return
+	}
 	if req.ParentExpiryHours > 0 {
-		if req.ParentExpiryHours > 720 {
-			s.sendError(w, http.StatusBadRequest, "parent_expiry_hours must be between 1 and 720", "")
-			return
-		}
 		parentExpiry = time.Duration(req.ParentExpiryHours) * time.Hour
 	}
 
