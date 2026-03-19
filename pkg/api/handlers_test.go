@@ -583,6 +583,66 @@ func TestMetricsEndpoint_UpdatesFromStorage(t *testing.T) {
 	}
 }
 
+func TestCreateTokenPair_CustomParentExpiry(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	tests := []struct {
+		name                string
+		parentExpiryHours   int
+		expectedExpiryHours int
+	}{
+		{
+			name:                "default expiry when not specified",
+			parentExpiryHours:   0,
+			expectedExpiryHours: 30 * 24, // 720 hours = 30 days
+		},
+		{
+			name:                "custom 8 hour expiry",
+			parentExpiryHours:   8,
+			expectedExpiryHours: 8,
+		},
+		{
+			name:                "custom 24 hour expiry",
+			parentExpiryHours:   24,
+			expectedExpiryHours: 24,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			requestBody := TokenRequest{
+				UserID:            "expiry-test-user",
+				Network:           "testnet",
+				RateLimit:         100,
+				ParentExpiryHours: tt.parentExpiryHours,
+			}
+
+			body, _ := json.Marshal(requestBody)
+			req := httptest.NewRequest("POST", "/token-pairs", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			server.CreateTokenPair(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("Expected status %d, got %d (body: %s)", http.StatusCreated, w.Code, w.Body.String())
+			}
+
+			var resp auth.TokenPairResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("Failed to decode response: %v", err)
+			}
+
+			expectedSeconds := int64(tt.expectedExpiryHours * 3600)
+			if resp.ParentExpiry != expectedSeconds {
+				t.Errorf("Expected parent_expiry %d seconds (%d hours), got %d seconds",
+					expectedSeconds, tt.expectedExpiryHours, resp.ParentExpiry)
+			}
+		})
+	}
+}
+
 func TestRevokeToken_CascadesToChildren(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()

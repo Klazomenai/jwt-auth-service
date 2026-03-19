@@ -26,11 +26,12 @@ type Server struct {
 
 // TokenRequest represents a token creation request
 type TokenRequest struct {
-	UserID       string `json:"user_id"`
-	Network      string `json:"network"`
-	RateLimit    int    `json:"rate_limit,omitempty"`
-	ExpiryDays   int    `json:"expiry_days,omitempty"`   // Default: 30 days
-	IncludeChild bool   `json:"include_child,omitempty"` // Whether to include child token in response (default: false)
+	UserID            string `json:"user_id"`
+	Network           string `json:"network"`
+	RateLimit         int    `json:"rate_limit,omitempty"`
+	ExpiryDays        int    `json:"expiry_days,omitempty"`          // Default: 30 days (used by /tokens)
+	ParentExpiryHours int    `json:"parent_expiry_hours,omitempty"`  // Custom parent expiry in hours (used by /token-pairs, default: 720 = 30 days)
+	IncludeChild      bool   `json:"include_child,omitempty"`        // Whether to include child token in response (default: false)
 }
 
 // TokenResponse represents a token creation response
@@ -177,8 +178,11 @@ func (s *Server) CreateTokenPair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Use default token expiries from auth package
-	childExpiry := auth.DefaultChildTokenExpiry   // 15 minutes
+	childExpiry := auth.DefaultChildTokenExpiry // 15 minutes
 	parentExpiry := auth.DefaultParentTokenExpiry // 30 days
+	if req.ParentExpiryHours > 0 {
+		parentExpiry = time.Duration(req.ParentExpiryHours) * time.Hour
+	}
 
 	// Create token pair (parent + optional child)
 	tokenPair, err := s.jwtService.CreateTokenPair(req.UserID, req.Network, req.RateLimit, childExpiry, parentExpiry, req.IncludeChild)
