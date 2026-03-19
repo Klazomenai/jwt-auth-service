@@ -607,6 +607,11 @@ func TestCreateTokenPair_CustomParentExpiry(t *testing.T) {
 			parentExpiryHours:   24,
 			expectedExpiryHours: 24,
 		},
+		{
+			name:                "max allowed 720 hour expiry",
+			parentExpiryHours:   720,
+			expectedExpiryHours: 720,
+		},
 	}
 
 	for _, tt := range tests {
@@ -640,6 +645,30 @@ func TestCreateTokenPair_CustomParentExpiry(t *testing.T) {
 					expectedSeconds, tt.expectedExpiryHours, resp.ParentExpiry)
 			}
 		})
+	}
+}
+
+func TestCreateTokenPair_RejectsExcessiveParentExpiry(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	requestBody := TokenRequest{
+		UserID:            "expiry-test-user",
+		Network:           "testnet",
+		RateLimit:         100,
+		ParentExpiryHours: 721,
+	}
+
+	body, _ := json.Marshal(requestBody)
+	req := httptest.NewRequest("POST", "/token-pairs", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.CreateTokenPair(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d for parent_expiry_hours=721, got %d (body: %s)",
+			http.StatusBadRequest, w.Code, w.Body.String())
 	}
 }
 

@@ -29,7 +29,7 @@ type TokenRequest struct {
 	UserID            string `json:"user_id"`
 	Network           string `json:"network"`
 	RateLimit         int    `json:"rate_limit,omitempty"`
-	ExpiryDays        int    `json:"expiry_days,omitempty"`          // Default: 30 days (used by /tokens)
+	ExpiryDays        int    `json:"expiry_days,omitempty"`          // Expiry in days (used by /tokens, default: 1 hour when 0)
 	ParentExpiryHours int    `json:"parent_expiry_hours,omitempty"`  // Custom parent expiry in hours (used by /token-pairs, default: 720 = 30 days)
 	IncludeChild      bool   `json:"include_child,omitempty"`        // Whether to include child token in response (default: false)
 }
@@ -181,6 +181,10 @@ func (s *Server) CreateTokenPair(w http.ResponseWriter, r *http.Request) {
 	childExpiry := auth.DefaultChildTokenExpiry // 15 minutes
 	parentExpiry := auth.DefaultParentTokenExpiry // 30 days
 	if req.ParentExpiryHours > 0 {
+		if req.ParentExpiryHours > 720 {
+			s.sendError(w, http.StatusBadRequest, "parent_expiry_hours must be between 1 and 720", "")
+			return
+		}
 		parentExpiry = time.Duration(req.ParentExpiryHours) * time.Hour
 	}
 
