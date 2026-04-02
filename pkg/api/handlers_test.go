@@ -314,8 +314,8 @@ func TestAuthorize_InvalidAutonityTokenBlocksBearerFallback(t *testing.T) {
 
 	server.Authorize(w, req)
 
-	if w.Code == http.StatusOK {
-		t.Errorf("Expected failure when Autonity-Token is invalid even with valid Bearer, got 200")
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 Unauthorized when Autonity-Token is invalid even with valid Bearer, got %d (body: %s)", w.Code, w.Body.String())
 	}
 }
 
@@ -324,7 +324,10 @@ func TestAuthorize_RevokedToken(t *testing.T) {
 	defer mr.Close()
 
 	// Create and revoke a token
-	token, tokenID, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	token, tokenID, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
 	ctx := context.Background()
 	server.store.RevokeToken(ctx, tokenID, 1*time.Hour)
 
