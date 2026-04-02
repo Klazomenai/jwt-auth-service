@@ -401,12 +401,13 @@ func (s *Server) RevokeUserTokens(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Authorize handles external authorization requests from Envoy ext_authz filter
-// This endpoint checks if a JWT token (already validated) has been revoked
+// Authorize handles external authorization requests from Envoy/Istio.
+// Validates the JWT signature, checks revocation status (including parent cascade),
+// and returns 200/401/403 accordingly.
 func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
 	// Extract JWT token — prefer Autonity-Token header (RFC 6648 compliant custom header),
 	// fall back to Authorization: Bearer for backwards compatibility during migration.
-	tokenString := r.Header.Get("Autonity-Token")
+	tokenString := strings.TrimSpace(r.Header.Get("Autonity-Token"))
 	if tokenString == "" {
 		// Backwards compatibility: extract from Authorization: Bearer <token>
 		// RFC 9110 §11.1: auth scheme is case-insensitive.

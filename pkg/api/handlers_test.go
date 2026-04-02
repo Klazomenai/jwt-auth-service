@@ -236,8 +236,10 @@ func TestAuthorize_ValidToken(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()
 
-	// Create a valid token
-	token, _, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	token, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
 
 	// Test authorization with Autonity-Token header (primary)
 	req := httptest.NewRequest("POST", "/authorize", nil)
@@ -255,8 +257,10 @@ func TestAuthorize_ValidToken_BearerFallback(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()
 
-	// Create a valid token
-	token, _, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	token, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
 
 	// Test authorization with Authorization: Bearer (backwards compat)
 	req := httptest.NewRequest("POST", "/authorize", nil)
@@ -274,8 +278,10 @@ func TestAuthorize_AutonityTokenTakesPrecedence(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()
 
-	// Create a valid token and an invalid one
-	validToken, _, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	validToken, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
 
 	// Send valid in Autonity-Token, invalid in Authorization
 	req := httptest.NewRequest("POST", "/authorize", nil)
