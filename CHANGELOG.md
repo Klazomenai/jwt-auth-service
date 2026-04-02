@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.4-alpha.0...v0.1.5-alpha.0) (2026-04-02)
+
+
+### Added
+
+* **api:** accept Autonity-Token header for JWT delivery ⛵ ([#64](https://github.com/Klazomenai/jwt-auth-service/issues/64)) ([7e4a0cb](https://github.com/Klazomenai/jwt-auth-service/commit/7e4a0cb61126a76a617934ee05f77f601b4b5304))
+* **api:** accept custom parent_expiry_hours in token pair requests ⛵ ([#58](https://github.com/Klazomenai/jwt-auth-service/issues/58)) ([829e32c](https://github.com/Klazomenai/jwt-auth-service/commit/829e32c3c0b095bdf62aca978bf4509fea3287f0))
+
+
+### Fixed
+
+* disable commitlint subject-case rule 🐛 ([#66](https://github.com/Klazomenai/jwt-auth-service/issues/66)) ([5538b8c](https://github.com/Klazomenai/jwt-auth-service/commit/5538b8c94d18479398eb27bfcb30b83f62ad62a3)), closes [#65](https://github.com/Klazomenai/jwt-auth-service/issues/65)
+
 ## [0.1.4-alpha.0](https://github.com/Klazomenai/jwt-auth-service/compare/v0.1.3-alpha.0...v0.1.4-alpha.0) (2026-03-03)
 
 
