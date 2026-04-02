@@ -289,7 +289,7 @@ with other protocols that use `Authorization: Bearer` for non-JWT tokens on shar
 For backwards compatibility, `Authorization: Bearer <token>` is also accepted. `Autonity-Token`
 takes precedence when both headers are present.
 
-Returns `200 OK` if valid, `401/403` if invalid or revoked.
+Returns `200 OK` if valid. On error, returns a 4xx status (e.g. `400` for missing claims, `401` for invalid tokens, `403` for revoked tokens).
 
 ## Development
 
