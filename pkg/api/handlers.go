@@ -403,7 +403,7 @@ func (s *Server) RevokeUserTokens(w http.ResponseWriter, r *http.Request) {
 
 // Authorize handles external authorization requests from Envoy/Istio.
 // Validates the JWT signature, checks revocation status (including parent cascade),
-// and returns 200/401/403 accordingly.
+// and returns appropriate HTTP status codes (e.g., 200 on success, 400/401/403 on errors).
 func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
 	// Extract JWT token — prefer Autonity-Token header (RFC 6648 compliant custom header),
 	// fall back to Authorization: Bearer for backwards compatibility during migration.

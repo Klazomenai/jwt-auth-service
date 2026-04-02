@@ -296,6 +296,29 @@ func TestAuthorize_AutonityTokenTakesPrecedence(t *testing.T) {
 	}
 }
 
+func TestAuthorize_InvalidAutonityTokenBlocksBearerFallback(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	validToken, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
+
+	// Send invalid Autonity-Token and valid Authorization: Bearer —
+	// Autonity-Token is authoritative when present, no fallback.
+	req := httptest.NewRequest("POST", "/authorize", nil)
+	req.Header.Set("Autonity-Token", "invalid.token.here")
+	req.Header.Set("Authorization", "Bearer "+validToken)
+	w := httptest.NewRecorder()
+
+	server.Authorize(w, req)
+
+	if w.Code == http.StatusOK {
+		t.Errorf("Expected failure when Autonity-Token is invalid even with valid Bearer, got 200")
+	}
+}
+
 func TestAuthorize_RevokedToken(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()
