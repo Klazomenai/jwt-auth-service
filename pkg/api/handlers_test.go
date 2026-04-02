@@ -237,7 +237,7 @@ func TestAuthorize_ValidToken(t *testing.T) {
 	defer mr.Close()
 
 	// Create a valid token
-	token, tokenID, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	token, _, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
 
 	// Test authorization with Autonity-Token header (primary)
 	req := httptest.NewRequest("POST", "/authorize", nil)
@@ -249,8 +249,6 @@ func TestAuthorize_ValidToken(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200 with Autonity-Token header, got %d (body: %s)", w.Code, w.Body.String())
 	}
-
-	_ = tokenID // Used to avoid unused variable error
 }
 
 func TestAuthorize_ValidToken_BearerFallback(t *testing.T) {
