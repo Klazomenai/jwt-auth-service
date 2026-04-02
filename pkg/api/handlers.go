@@ -407,8 +407,15 @@ func (s *Server) RevokeUserTokens(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
 	// Extract JWT token — prefer Autonity-Token header (RFC 6648 compliant custom header),
 	// fall back to Authorization: Bearer for backwards compatibility during migration.
-	tokenString := strings.TrimSpace(r.Header.Get("Autonity-Token"))
-	if tokenString == "" {
+	// When Autonity-Token is present (even if empty), it is authoritative — no Bearer fallback.
+	var tokenString string
+	if _, ok := r.Header["Autonity-Token"]; ok {
+		tokenString = strings.TrimSpace(r.Header.Get("Autonity-Token"))
+		if tokenString == "" {
+			s.sendError(w, http.StatusUnauthorized, "Empty Autonity-Token header", "")
+			return
+		}
+	} else {
 		// Backwards compatibility: extract from Authorization: Bearer <token>
 		// RFC 9110 §11.1: auth scheme is case-insensitive.
 		authHeader := r.Header.Get("Authorization")

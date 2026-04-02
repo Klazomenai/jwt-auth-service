@@ -351,6 +351,7 @@ func TestAuthorize_InvalidToken(t *testing.T) {
 	tests := []struct {
 		name             string
 		autonityToken    string
+		setAutonityToken bool // explicitly set header even if empty
 		authHeader       string
 		expectedStatus   int
 	}{
@@ -362,6 +363,13 @@ func TestAuthorize_InvalidToken(t *testing.T) {
 			name:           "invalid autonity-token",
 			autonityToken:  "invalid.token.here",
 			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:             "empty autonity-token blocks bearer fallback",
+			setAutonityToken: true,
+			autonityToken:    "",
+			authHeader:       "Bearer valid.looking.token",
+			expectedStatus:   http.StatusUnauthorized,
 		},
 		{
 			name:           "invalid bearer token (fallback)",
@@ -383,7 +391,7 @@ func TestAuthorize_InvalidToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("POST", "/authorize", nil)
-			if tt.autonityToken != "" {
+			if tt.autonityToken != "" || tt.setAutonityToken {
 				req.Header.Set("Autonity-Token", tt.autonityToken)
 			}
 			if tt.authHeader != "" {
