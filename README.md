@@ -280,8 +280,14 @@ Returns Prometheus-formatted metrics for monitoring token lifecycle:
 
 ```bash
 POST /authorize
-Authorization: Bearer <token>
+Autonity-Token: <token>
 ```
+
+The `Autonity-Token` header carries the raw JWT (no `Bearer` prefix). This avoids conflicts
+with other protocols that use `Authorization: Bearer` for non-JWT tokens on shared gateways.
+
+For backwards compatibility, `Authorization: Bearer <token>` is also accepted. `Autonity-Token`
+takes precedence when both headers are present.
 
 Returns `200 OK` if valid, `401/403` if invalid or revoked.
 

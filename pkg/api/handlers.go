@@ -403,19 +403,23 @@ func (s *Server) RevokeUserTokens(w http.ResponseWriter, r *http.Request) {
 // Authorize handles external authorization requests from Envoy ext_authz filter
 // This endpoint checks if a JWT token (already validated) has been revoked
 func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
-	// Extract JWT from Authorization header
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		s.sendError(w, http.StatusUnauthorized, "Missing Authorization header", "")
-		return
+	// Extract JWT token — prefer Autonity-Token header (RFC 6648 compliant custom header),
+	// fall back to Authorization: Bearer for backwards compatibility during migration.
+	tokenString := r.Header.Get("Autonity-Token")
+	if tokenString == "" {
+		// Backwards compatibility: extract from Authorization: Bearer <token>
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+				tokenString = authHeader[7:]
+			} else {
+				s.sendError(w, http.StatusUnauthorized, "Invalid Authorization header format", "Expected 'Bearer <token>' or use 'Autonity-Token' header")
+				return
+			}
+		}
 	}
-
-	// Extract token from "Bearer <token>" format
-	tokenString := ""
-	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-		tokenString = authHeader[7:]
-	} else {
-		s.sendError(w, http.StatusUnauthorized, "Invalid Authorization header format", "Expected 'Bearer <token>'")
+	if tokenString == "" {
+		s.sendError(w, http.StatusUnauthorized, "Missing token", "Provide 'Autonity-Token' header or 'Authorization: Bearer <token>'")
 		return
 	}
 
