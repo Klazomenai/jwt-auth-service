@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -408,10 +409,11 @@ func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
 	tokenString := r.Header.Get("Autonity-Token")
 	if tokenString == "" {
 		// Backwards compatibility: extract from Authorization: Bearer <token>
+		// RFC 9110 §11.1: auth scheme is case-insensitive.
 		authHeader := r.Header.Get("Authorization")
 		if authHeader != "" {
-			if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-				tokenString = authHeader[7:]
+			if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
+				tokenString = strings.TrimSpace(authHeader[7:])
 			} else {
 				s.sendError(w, http.StatusUnauthorized, "Invalid Authorization header format", "Expected 'Bearer <token>' or use 'Autonity-Token' header")
 				return
