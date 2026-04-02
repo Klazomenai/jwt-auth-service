@@ -236,10 +236,33 @@ func TestAuthorize_ValidToken(t *testing.T) {
 	server, mr := setupTestServer(t)
 	defer mr.Close()
 
-	// Create a valid token
-	token, tokenID, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	token, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
 
-	// Test authorization
+	// Test authorization with Autonity-Token header (primary)
+	req := httptest.NewRequest("POST", "/authorize", nil)
+	req.Header.Set("Autonity-Token", token)
+	w := httptest.NewRecorder()
+
+	server.Authorize(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 with Autonity-Token header, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestAuthorize_ValidToken_BearerFallback(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	token, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
+
+	// Test authorization with Authorization: Bearer (backwards compat)
 	req := httptest.NewRequest("POST", "/authorize", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
@@ -247,10 +270,53 @@ func TestAuthorize_ValidToken(t *testing.T) {
 	server.Authorize(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d (body: %s)", w.Code, w.Body.String())
+		t.Errorf("Expected status 200 with Authorization: Bearer fallback, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestAuthorize_AutonityTokenTakesPrecedence(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	validToken, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
 	}
 
-	_ = tokenID // Used to avoid unused variable error
+	// Send valid in Autonity-Token, invalid in Authorization
+	req := httptest.NewRequest("POST", "/authorize", nil)
+	req.Header.Set("Autonity-Token", validToken)
+	req.Header.Set("Authorization", "Bearer invalid.token.here")
+	w := httptest.NewRecorder()
+
+	server.Authorize(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected Autonity-Token to take precedence, got %d (body: %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestAuthorize_InvalidAutonityTokenBlocksBearerFallback(t *testing.T) {
+	server, mr := setupTestServer(t)
+	defer mr.Close()
+
+	validToken, _, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
+
+	// Send invalid Autonity-Token and valid Authorization: Bearer —
+	// Autonity-Token is authoritative when present, no fallback.
+	req := httptest.NewRequest("POST", "/authorize", nil)
+	req.Header.Set("Autonity-Token", "invalid.token.here")
+	req.Header.Set("Authorization", "Bearer "+validToken)
+	w := httptest.NewRecorder()
+
+	server.Authorize(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 Unauthorized when Autonity-Token is invalid even with valid Bearer, got %d (body: %s)", w.Code, w.Body.String())
+	}
 }
 
 func TestAuthorize_RevokedToken(t *testing.T) {
@@ -258,13 +324,16 @@ func TestAuthorize_RevokedToken(t *testing.T) {
 	defer mr.Close()
 
 	// Create and revoke a token
-	token, tokenID, _ := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	token, tokenID, err := server.jwtService.CreateToken("alice", "devnet", 100, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to create token: %v", err)
+	}
 	ctx := context.Background()
 	server.store.RevokeToken(ctx, tokenID, 1*time.Hour)
 
-	// Test authorization with revoked token
+	// Test authorization with revoked token via Autonity-Token header
 	req := httptest.NewRequest("POST", "/authorize", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Autonity-Token", token)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -280,22 +349,35 @@ func TestAuthorize_InvalidToken(t *testing.T) {
 	defer mr.Close()
 
 	tests := []struct {
-		name           string
-		authHeader     string
-		expectedStatus int
+		name             string
+		autonityToken    string
+		setAutonityToken bool // explicitly set header even if empty
+		authHeader       string
+		expectedStatus   int
 	}{
 		{
-			name:           "missing authorization header",
-			authHeader:     "",
+			name:           "missing both headers",
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
-			name:           "invalid token format",
+			name:           "invalid autonity-token",
+			autonityToken:  "invalid.token.here",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:             "empty autonity-token blocks bearer fallback",
+			setAutonityToken: true,
+			autonityToken:    "",
+			authHeader:       "Bearer valid.looking.token",
+			expectedStatus:   http.StatusUnauthorized,
+		},
+		{
+			name:           "invalid bearer token (fallback)",
 			authHeader:     "Bearer invalid.token.here",
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
-			name:           "malformed header",
+			name:           "malformed authorization header",
 			authHeader:     "NotBearer token",
 			expectedStatus: http.StatusUnauthorized,
 		},
@@ -309,6 +391,9 @@ func TestAuthorize_InvalidToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("POST", "/authorize", nil)
+			if tt.autonityToken != "" || tt.setAutonityToken {
+				req.Header.Set("Autonity-Token", tt.autonityToken)
+			}
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
@@ -335,7 +420,7 @@ func TestAuthorize_SupportedMethods(t *testing.T) {
 	for _, method := range methods {
 		t.Run(method, func(t *testing.T) {
 			req := httptest.NewRequest(method, "/authorize", nil)
-			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Autonity-Token", token)
 			w := httptest.NewRecorder()
 
 			server.Authorize(w, req)
@@ -777,7 +862,7 @@ func TestAuthorize_ChildWithRevokedParent(t *testing.T) {
 
 	// Authorize child token before revoking parent — should succeed
 	req := httptest.NewRequest("POST", "/authorize", nil)
-	req.Header.Set("Authorization", "Bearer "+childToken)
+	req.Header.Set("Autonity-Token", childToken)
 	w := httptest.NewRecorder()
 	server.Authorize(w, req)
 
@@ -793,7 +878,7 @@ func TestAuthorize_ChildWithRevokedParent(t *testing.T) {
 
 	// Authorize child token after revoking parent — should fail
 	req2 := httptest.NewRequest("POST", "/authorize", nil)
-	req2.Header.Set("Authorization", "Bearer "+childToken)
+	req2.Header.Set("Autonity-Token", childToken)
 	w2 := httptest.NewRecorder()
 	server.Authorize(w2, req2)
 
@@ -820,7 +905,7 @@ func TestAuthorize_ChildWithValidParent(t *testing.T) {
 
 	// Authorize child token — should succeed (parent not revoked)
 	req := httptest.NewRequest("POST", "/authorize", nil)
-	req.Header.Set("Authorization", "Bearer "+childToken)
+	req.Header.Set("Autonity-Token", childToken)
 	w := httptest.NewRecorder()
 	server.Authorize(w, req)
 

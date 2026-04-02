@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -400,22 +401,35 @@ func (s *Server) RevokeUserTokens(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Authorize handles external authorization requests from Envoy ext_authz filter
-// This endpoint checks if a JWT token (already validated) has been revoked
+// Authorize handles external authorization requests from Envoy/Istio.
+// Validates the JWT signature, checks revocation status (including parent cascade),
+// and returns appropriate HTTP status codes (e.g., 200 on success, 400/401/403 on errors).
 func (s *Server) Authorize(w http.ResponseWriter, r *http.Request) {
-	// Extract JWT from Authorization header
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		s.sendError(w, http.StatusUnauthorized, "Missing Authorization header", "")
-		return
-	}
-
-	// Extract token from "Bearer <token>" format
-	tokenString := ""
-	if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-		tokenString = authHeader[7:]
+	// Extract JWT token — prefer Autonity-Token header (RFC 6648 compliant custom header),
+	// fall back to Authorization: Bearer for backwards compatibility during migration.
+	// When Autonity-Token is present (even if empty), it is authoritative — no Bearer fallback.
+	var tokenString string
+	if _, ok := r.Header["Autonity-Token"]; ok {
+		tokenString = strings.TrimSpace(r.Header.Get("Autonity-Token"))
+		if tokenString == "" {
+			s.sendError(w, http.StatusUnauthorized, "Empty Autonity-Token header", "")
+			return
+		}
 	} else {
-		s.sendError(w, http.StatusUnauthorized, "Invalid Authorization header format", "Expected 'Bearer <token>'")
+		// Backwards compatibility: extract from Authorization: Bearer <token>
+		// RFC 9110 §11.1: auth scheme is case-insensitive.
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
+				tokenString = strings.TrimSpace(authHeader[7:])
+			} else {
+				s.sendError(w, http.StatusUnauthorized, "Invalid Authorization header format", "Expected 'Bearer <token>' or use 'Autonity-Token' header")
+				return
+			}
+		}
+	}
+	if tokenString == "" {
+		s.sendError(w, http.StatusUnauthorized, "Missing token", "Provide 'Autonity-Token' header or 'Authorization: Bearer <token>'")
 		return
 	}
 
